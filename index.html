@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小小工具箱 - 实用在线工具集</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+<style>
+/* ─── CSS Variables ─── */
+:root {
+    --bg-primary: #0f1117;
+    --bg-secondary: #161822;
+    --bg-card: #1c1f2e;
+    --bg-hover: #232738;
+    --border: #2a2e3f;
+    --text-primary: #e2e8f0;
+    --text-secondary: #8b95a8;
+    --text-muted: #5a6478;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --accent-glow: rgba(99, 102, 241, 0.15);
+    --blue: #3b82f6;
+    --green: #10b981;
+    --orange: #f59e0b;
+    --pink: #ec4899;
+    --radius: 12px;
+    --radius-sm: 8px;
+}
+[data-theme="light"] {
+    --bg-primary: #f5f6fa;
+    --bg-secondary: #ffffff;
+    --bg-card: #ffffff;
+    --bg-hover: #f0f1f5;
+    --border: #e2e5ed;
+    --text-primary: #1a1d2e;
+    --text-secondary: #5a6478;
+    --text-muted: #9ca3af;
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --accent-glow: rgba(99, 102, 241, 0.08);
+}
+
+/* ─── Reset ─── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+a { text-decoration: none; color: inherit; }
+
+/* ─── Header ─── */
+.header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    height: 56px;
+}
+.header-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.logo-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.logo h1 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.theme-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+.theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ─── Hero ─── */
+.hero {
+    position: relative;
+    text-align: center;
+    padding: 64px 24px 48px;
+    overflow: hidden;
+}
+.hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(99,102,241,0.1) 0%, transparent 70%);
+    pointer-events: none;
+}
+.hero-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    background: var(--accent-glow);
+    border: 1px solid rgba(99,102,241,0.2);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 18px;
+    position: relative;
+}
+.hero-chip .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: blink 2s infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.hero h2 {
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 12px;
+    position: relative;
+}
+.hero h2 em {
+    font-style: normal;
+    background: linear-gradient(135deg, #6366f1, #a78bfa, #ec4899);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.hero p {
+    font-size: 15px;
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+    position: relative;
+}
+.hero-search {
+    position: relative;
+    max-width: 500px;
+    margin: 0 auto;
+}
+.hero-search input {
+    width: 100%;
+    height: 48px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    padding: 0 18px 0 46px;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.25s;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+.hero-search input::placeholder { color: var(--text-muted); }
+.hero-search input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow), 0 2px 12px rgba(0,0,0,0.06);
+}
+.hero-search .s-icon {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 16px;
+    pointer-events: none;
+}
+
+/* ─── Tools Section ─── */
+.tools-wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px 48px;
+}
+.tools-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+.tools-head h3 {
+    font-size: 17px;
+    font-weight: 700;
+}
+.tools-head .count {
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: var(--bg-card);
+    padding: 4px 12px;
+    border-radius: 8px;
+}
+.tool-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+}
+
+/* ─── Tool Card ─── */
+.tool-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+}
+.tool-card::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+.tool-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+    border-color: transparent;
+}
+.tool-card:hover::after { opacity: 1; }
+.tool-card[data-color="blue"]::after { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+.tool-card[data-color="green"]::after { background: linear-gradient(90deg, #10b981, #34d399); }
+.tool-card[data-color="purple"]::after { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+.tool-card[data-color="orange"]::after { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.tool-card[data-color="pink"]::after { background: linear-gradient(90deg, #ec4899, #f472b6); }
+.tool-card[data-color="blue"]:hover { border-color: rgba(59,130,246,0.25); }
+.tool-card[data-color="green"]:hover { border-color: rgba(16,185,129,0.25); }
+.tool-card[data-color="purple"]:hover { border-color: rgba(139,92,246,0.25); }
+.tool-card[data-color="orange"]:hover { border-color: rgba(245,158,11,0.25); }
+.tool-card[data-color="pink"]:hover { border-color: rgba(236,72,153,0.25); }
+
+.card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+.card-icon {
+    width: 46px; height: 46px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+    transition: transform 0.25s;
+}
+.tool-card:hover .card-icon { transform: scale(1.06); }
+.card-meta h4 {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.3;
+    margin-bottom: 3px;
+}
+.card-meta .badge {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.card-body {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    flex: 1;
+    margin-bottom: 14px;
+}
+.card-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.tag {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-weight: 500;
+}
+.tag-blue { background: rgba(59,130,246,0.1); color: #60a5fa; }
+.tag-green { background: rgba(16,185,129,0.1); color: #34d399; }
+.tag-purple { background: rgba(139,92,246,0.1); color: #a78bfa; }
+.tag-orange { background: rgba(245,158,11,0.1); color: #fbbf24; }
+.tag-pink { background: rgba(236,72,153,0.1); color: #f472b6; }
+
+.tool-card.hidden { display: none; }
+
+/* ─── Empty State ─── */
+.empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+    display: none;
+}
+.empty.show { display: block; }
+.empty-icon { font-size: 48px; margin-bottom: 10px; opacity: 0.4; }
+
+/* ─── Quick Links ─── */
+.quick {
+    max-width: 1200px;
+    margin: 0 auto 32px;
+    padding: 0 24px;
+}
+.quick-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+.quick-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.quick a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 12px;
+    transition: all 0.2s;
+}
+.quick a:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ─── Footer ─── */
+.footer {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-muted);
+    font-size: 12px;
+    border-top: 1px solid var(--border);
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 768px) {
+    .hero { padding: 40px 16px 32px; }
+    .hero h2 { font-size: 24px; }
+    .tool-grid { grid-template-columns: 1fr; }
+    .tools-wrap, .quick { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+    <div class="header-inner">
+        <a class="logo" href="/">
+            <div class="logo-icon">⚡</div>
+            <h1>小小工具箱</h1>
+        </a>
+        <div class="header-right">
+            <button class="theme-btn" id="themeBtn" title="切换主题">☀</button>
+        </div>
+    </div>
+</header>
+
+<section class="hero">
+    <div class="hero-chip"><span class="dot"></span> 全部免费在线使用</div>
+    <h2>你的 <em>万能工具箱</em></h2>
+    <p>视频解析、图片处理、格式转换……日常工作所需的一站式工具集合</p>
+    <div class="hero-search">
+        <span class="s-icon">🔍</span>
+        <input type="text" id="searchInput" placeholder="搜索工具名称或关键词..." autocomplete="off">
+    </div>
+</section>
+
+<section class="tools-wrap">
+    <div class="tools-head">
+        <h3>🧰 全部工具</h3>
+        <span class="count" id="countLabel">2 个工具</span>
+    </div>
+    <div class="tool-grid" id="toolGrid">
+        <a class="tool-card" href="video-tool/" data-color="blue" data-kw="视频 解析 下载 抖音 bilibili 小红书 tiktok youtube 快手 微博 西瓜 视频号 剪映">
+            <div class="card-head">
+                <div class="card-icon" style="background:rgba(59,130,246,0.12)">🎬</div>
+                <div class="card-meta">
+                    <h4>视频解析下载</h4>
+                    <span class="badge">支持 10+ 平台</span>
+                </div>
+            </div>
+            <div class="card-body">粘贴分享文本自动提取链接并解析视频信息，支持抖音、B站、小红书、TikTok、YouTube 等平台，可下载视频、复制直链、在线预览。</div>
+            <div class="card-foot">
+                <span class="tag tag-blue">抖音</span>
+                <span class="tag tag-blue">B站</span>
+                <span class="tag tag-blue">小红书</span>
+                <span class="tag tag-blue">TikTok</span>
+                <span class="tag tag-blue">YouTube</span>
+            </div>
+        </a>
+        <a class="tool-card" href="image-tool/" data-color="green" data-kw="图片 压缩 裁剪 批量处理 JPG PNG WebP 社媒预设 裁切 批量 格式转换">
+            <div class="card-head">
+                <div class="card-icon" style="background:rgba(16,185,129,0.12)">🖼️</div>
+                <div class="card-meta">
+                    <h4>图片批量处理</h4>
+                    <span class="badge">浏览器端处理</span>
+                </div>
+            </div>
+            <div class="card-body">图片压缩、裁剪、批量处理。支持 JPG/PNG/WebP，可设定目标文件大小，多种裁剪模式，内置社交媒体尺寸预设。</div>
+            <div class="card-foot">
+                <span class="tag tag-green">压缩</span>
+                <span class="tag tag-green">裁剪</span>
+                <span class="tag tag-green">批量</span>
+                <span class="tag tag-green">社媒预设</span>
+            </div>
+        </a>
+    </div>
+    <div class="empty" id="emptyState">
+        <div class="empty-icon">🔍</div>
+        <p>未找到匹配的工具，换个关键词试试</p>
+    </div>
+</section>
+
+<section class="quick">
+    <div class="quick-label">快捷入口</div>
+    <div class="quick-row">
+        <a href="video-tool/">🎬 视频解析</a>
+        <a href="image-tool/">🖼️ 图片处理</a>
+    </div>
+</section>
+
+<footer class="footer">
+    小小工具箱 &mdash; 轻量实用的在线工具集
+</footer>
+
+<script>
+// Theme
+const btn = document.getElementById('themeBtn');
+function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('theme', t);
+    btn.textContent = t === 'dark' ? '☀' : '☾';
+}
+setTheme(localStorage.getItem('theme') || 'light');
+btn.onclick = () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+
+// Search
+const input = document.getElementById('searchInput');
+const cards = document.querySelectorAll('.tool-card');
+const empty = document.getElementById('emptyState');
+const countLabel = document.getElementById('countLabel');
+input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    let n = 0;
+    cards.forEach(c => {
+        const kw = (c.dataset.kw || '') + ' ' + c.querySelector('h4').textContent + ' ' + c.querySelector('.card-body').textContent;
+        const show = !q || kw.toLowerCase().includes(q);
+        c.classList.toggle('hidden', !show);
+        if (show) n++;
+    });
+    empty.classList.toggle('show', n === 0);
+    countLabel.textContent = q ? n + ' 个结果' : cards.length + ' 个工具';
+});
+</script>
+</body>
+</html>
