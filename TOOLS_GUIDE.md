@@ -60,61 +60,76 @@
    "myplatform": (myplatform.DOMAINS, myplatform.parse),
    ```
 
-## 方式四：AI 模型驱动工具
+## 方式四：AI 模型驱动工具（V3.0 架构）
 
 适用于需要 AI 模型推理的工具（如智能抠图）。参考 `bg-remover` 实现。
 
+### 后端架构（services 层）
+
+V3.0 将 AI 工具拆分为独立服务模块，位于 `backend/services/`：
+
+| 模块 | 职责 |
+|------|------|
+| `model_manager.py` | 模型注册、加载、Session 缓存、线程安全 |
+| `image_classifier.py` | 图片类型分类（MobileNetV3 ONNX） |
+| `model_router.py` | 根据分类+负载自动选模型 |
+| `image_optimizer.py` | 模型相关图片预处理（尺寸、颜色模式） |
+| `post_processor.py` | 边缘优化（高斯羽化、Alpha 优化、去白边） |
+| `task_queue.py` | ThreadPoolExecutor 并发批量处理 |
+| `disk_cache.py` | 磁盘持久化 LRU 缓存（300条，7天TTL） |
+
 ### 后端要点
 
-1. **模型管理**：在 `backend/main.py` 中定义模型字典和加载函数
+1. **模型管理**：`ModelManager` 类集中管理模型生命周期
    ```python
-   BG_MODELS = {
-       "model_name": "模型描述",
-   }
-   
-   def _get_bg_session(model_name: str = None):
-       # 按需加载模型，全局缓存 session
-       ...
+   model_manager = ModelManager()
+   session = model_manager.get_session("bria-rmbg")
    ```
 
-2. **结果缓存**：使用 LRU 缓存相同输入的结果，避免重复计算
+2. **智能路由**：`ModelRouter` 根据图片分类自动选模型
    ```python
-   _bg_cache = OrderedDict()
-   _BG_CACHE_MAX = 50
-   
-   def _cache_key(data: bytes, model: str, quality: str) -> str:
-       h = hashlib.md5(data).hexdigest()
-       return f"{h}_{model}_{quality}"
+   model = model_router.select_model(classification="product", batch_size=10)
    ```
 
-3. **图片预处理**：统一颜色模式、限制尺寸、检测损坏文件
+3. **磁盘缓存**：`DiskCache` 替代内存缓存，支持 TTL 和容量限制
    ```python
-   def _preprocess_image(data: bytes, fast: bool = False) -> "Image.Image":
-       from PIL import Image
-       img = Image.open(io.BytesIO(data))
-       img.load()  # 强制解码，检测损坏
-       # 统一颜色模式、限制尺寸...
+   disk_cache = DiskCache(cache_dir="cache", max_entries=300, ttl_days=7)
+   disk_cache.put(key, png_bytes, metadata={"model": "bria-rmbg"})
    ```
 
-4. **API 设计**：
+4. **并发处理**：`TaskQueue` 使用 ThreadPoolExecutor
+   ```python
+   results = await task_queue.process_batch(tasks, process_fn)
+   ```
+
+5. **API 设计**：
    - `GET /api/{tool}/models` — 返回可用模型列表
    - `POST /api/{tool}` — 单张处理（FormData 上传）
-   - 异步处理 + 超时保护（`asyncio.wait_for` + `asyncio.to_thread`）
+   - `POST /api/{tool}-batch` — 批量并发处理
+   - `POST /api/{tool}-batch-stream` — SSE 实时进度
+   - 响应头携带元数据：`X-Image-Classification`, `X-Model-Used`, `X-Cache-Hit`
 
 ### 前端要点
 
 1. **上传区**：支持拖拽、点击、`Ctrl+V` 粘贴
 2. **客户端预缩放**：上传前用 Canvas 缩放，减少传输体积
-3. **预览对比**：支持原图/结果/对比三种视图模式
-4. **手动编辑**：Canvas 画笔擦除/恢复，支持撤销历史
-5. **批量操作**：逐张调用 API，支持全选/批量下载 ZIP
+3. **自动重试**：失败自动重试 2 次
+4. **并发批量**：前端 3 路 worker 并发处理，实时进度显示
+5. **预览对比**：支持原图/结果/对比三种视图模式
+6. **手动编辑**：Canvas 画笔擦除/恢复，支持撤销历史
+7. **导出格式**：PNG / WebP 可选，批量 ZIP 打包
+8. **开发者模式**：三击版本徽章显示分类/模型/缓存/耗时信息
 
 ### 新增依赖
 
-在 `requirements.txt` 中添加 AI 相关依赖：
+在 `requirements.txt` 中添加：
 ```
 rembg>=2.0.50
 onnxruntime>=1.16.0
+opencv-python-headless>=4.8.0
+psutil>=5.9.0
+scipy>=1.11.0
+Pillow>=10.0.0
 ```
 
 在 `launcher.py` 的 `optional` 列表中注册可选依赖：
@@ -122,5 +137,8 @@ onnxruntime>=1.16.0
 optional = [
     ('yt_dlp', 'yt-dlp'),
     ('rembg', 'rembg'),
+    ('cv2', 'opencv-python-headless'),
+    ('psutil', 'psutil'),
+    ('scipy', 'scipy'),
 ]
 ```

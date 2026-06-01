@@ -17,10 +17,14 @@
 - 详见 [图片工具](/tools/image-tool/)
 
 ### ✂️ 智能抠图
-- AI 自动识别主体，一键去除图片背景，生成透明 PNG
-- 基于 rembg + ONNX Runtime，支持 5 种深度学习模型可选
+- AI 自动识别图片类型（商品/人物/宠物/通用），自动选择最佳模型
+- 基于 rembg + ONNX Runtime，支持 rmbg-2.0 / ISNet / U2Net 三种模型
+- 图片类型识别：MobileNetV3 ONNX 推理分类
+- 智能模型路由：根据图片类型、CPU 负载、批量大小自动选模型
+- 并发批量处理（ThreadPoolExecutor），磁盘持久化缓存（300条，7天TTL）
+- 边缘优化：高斯羽化、Alpha 优化、去白边
 - 手动编辑画笔（擦除/恢复），支持缩放、对比预览
-- 批量处理、结果缓存、速度/质量双模式
+- 支持 PNG / WebP 导出，批量 ZIP 打包
 - 详见 [抠图工具](/tools/bg-remover/)
 
 ### 🎨 溶图合成
@@ -75,8 +79,20 @@ utils-toolkit/
 ├── backend/                   # 后端服务
 │   ├── main.py                # FastAPI 应用
 │   ├── decrypt.py             # 微信视频号解密
-│   └── parsers/               # 多平台视频解析器
-
+│   ├── parsers/               # 多平台视频解析器
+│   │   ├── __init__.py        # 统一入口
+│   │   ├── _utils.py          # 共用函数
+│   │   ├── douyin.py          # 抖音
+│   │   ├── bilibili.py        # B站
+│   │   └── ...                # 共 10 个平台
+│   └── services/              # V3.0 AI 服务层
+│       ├── model_manager.py   # 模型管理器
+│       ├── image_classifier.py # 图片分类（MobileNetV3）
+│       ├── model_router.py    # 智能模型路由
+│       ├── image_optimizer.py # 图片预处理
+│       ├── post_processor.py  # 边缘优化
+│       ├── task_queue.py      # 并发任务队列
+│       └── disk_cache.py      # 磁盘缓存
 ├── tools/
 │   ├── libs/                  # 公共前端库
 │   │   ├── tailwind.js
@@ -104,7 +120,7 @@ utils-toolkit/
 - **后端**：FastAPI + uvicorn
 - **前端**：原生 HTML/CSS/JS（视频工具）、React 18（图片工具、抠图工具、溶图工具）
 - **视频解析**：自定义多平台解析器 + yt-dlp
-- **AI 抠图**：rembg + ONNX Runtime（支持 u2netp / u2net / isnet-general-use / u2net_human_seg / silueta 五种模型）
+- **AI 抠图**：rembg + ONNX Runtime + MobileNetV3（自动选择 rmbg-2.0 / isnet-general-use / u2net）
 - **图片处理**：Pillow (PIL)
 
 ## License

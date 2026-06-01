@@ -14,6 +14,9 @@ python/
 # AI models (auto-downloaded, ~100MB+)
 models/
 
+# Cache directory (auto-generated)
+cache/
+
 # Backend logs
 backend/app.log
 

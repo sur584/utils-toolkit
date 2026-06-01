@@ -27,6 +27,9 @@ def check_and_install_deps():
     optional = [
         ('yt_dlp', 'yt-dlp'),
         ('rembg', 'rembg'),
+        ('cv2', 'opencv-python-headless'),
+        ('psutil', 'psutil'),
+        ('scipy', 'scipy'),
     ]
 
     missing_req = []
@@ -115,8 +118,8 @@ def start_server():
 
 def main():
     print('=' * 50)
-    print('  小小工具箱')
-    print('  视频解析下载 | 图片批量处理')
+    print('  小小工具箱 v3.0')
+    print('  视频解析下载 | 图片批量处理 | AI 智能抠图')
     print('=' * 50)
     print()
 
