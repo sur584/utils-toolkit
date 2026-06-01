@@ -485,6 +485,86 @@ body::before {
     color: var(--warning);
 }
 
+.status-text {
+    white-space: pre-line;
+    line-height: 1.6;
+}
+
+/* ─── 手动输入视频URL ──────────────────────── */
+.manual-video-url {
+    margin-top: 16px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.manual-url-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: var(--warning);
+}
+
+.manual-url-icon {
+    font-size: 18px;
+}
+
+.manual-url-hint {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.manual-url-input-group {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.manual-url-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text);
+    font-size: 13px;
+}
+
+.manual-url-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.manual-url-guide {
+    font-size: 13px;
+}
+
+.manual-url-guide summary {
+    cursor: pointer;
+    color: var(--accent);
+    margin-bottom: 8px;
+}
+
+.guide-content {
+    padding: 12px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    line-height: 1.6;
+}
+
+.guide-content ol {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
+.guide-content p {
+    margin: 8px 0 4px;
+}
+
 /* ─── 结果面板 ──────────────────────────────── */
 .result-panel {
     margin-top: 24px;

@@ -4,13 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>图片批量处理工具</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script src="../libs/tailwind.js"></script>
+<script src="../libs/react.production.min.js"></script>
+<script src="../libs/react-dom.production.min.js"></script>
+<script src="../libs/babel.min.js"></script>
+<script src="../libs/browser-image-compression.js"></script>
+<script src="../libs/jszip.min.js"></script>
+<script src="../libs/FileSaver.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html{height:100%;overflow:hidden}
@@ -129,7 +129,7 @@ function Divider({onDrag}){
 // size: sm/md/lg, loading=显示加载动画
 function Btn({children,variant='primary',size='md',disabled,loading,className='',...props}){
   const v={primary:'bg-blue-500 hover:bg-blue-600 text-white shadow-sm',ghost:'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300',danger:'bg-red-50 text-red-500 border border-red-100 hover:bg-red-100'};
-  const s={sm:'px-3 py-1.5 text-xs gap-1.5',md:'px-4 py-2 text-sm gap-1.5',lg:'px-5 py-2.5 text-sm gap-2'};
+  const s={sm:'px-3.5 py-2 text-xs gap-1.5',md:'px-4 py-2.5 text-sm gap-1.5',lg:'px-5 py-3 text-sm gap-2'};
   return <button disabled={disabled||loading} className={`inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${v[variant]} ${s[size]} ${className}`} {...props}>{loading&&<span className="w-3.5 h-3.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin"/>}{children}</button>;
 }
 
@@ -153,7 +153,7 @@ function UploadZone({isButton=false}){
     return()=>{document.removeEventListener('paste',onPaste)};
   },[]);
   if(isButton)return<>
-    <button onClick={()=>ref.current?.click()} className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-dashed border-gray-300 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50/50 transition-all"><I.plus/>添加图片</button>
+    <button onClick={()=>ref.current?.click()} className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border border-dashed border-gray-300 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50/50 transition-all"><I.plus/>添加图片</button>
     <input ref={ref} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e=>{handle(e.target.files||[]);e.target.value=''}}/>
   </>;
   return <div onDrop={e=>{e.preventDefault();handle(e.dataTransfer?.files||[])}} onDragOver={e=>e.preventDefault()} onClick={()=>ref.current?.click()} className="flex flex-col items-center justify-center py-10 px-4 rounded-xl border-2 border-dashed border-gray-200 hover:border-blue-400 hover:bg-blue-50/30 cursor-pointer transition-all group">
@@ -167,14 +167,14 @@ function UploadZone({isButton=false}){
 // ==================== 空状态占位 ====================
 function EmptyState(){
   return <div className="flex-1 flex items-center justify-center h-full animate-fade-up">
-    <div className="text-center max-w-xs">
-      <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mx-auto mb-4 text-blue-500"><I.image/></div>
-      <h2 className="text-lg font-semibold text-gray-800 mb-1.5">拖入图片开始处理</h2>
-      <p className="text-xs text-gray-400 mb-5">支持 JPG、PNG、WEBP，可批量处理</p>
-      <div className="flex items-center justify-center gap-4 mb-5 text-[11px] text-gray-400">
-        <span className="flex items-center gap-1"><I.upload/>拖拽</span>
-        <span className="flex items-center gap-1"><I.clipboard/>Ctrl+V</span>
-        <span className="flex items-center gap-1"><I.folder/>选择</span>
+    <div className="text-center max-w-sm">
+      <div className="w-20 h-20 rounded-2xl bg-blue-50 flex items-center justify-center mx-auto mb-5 text-blue-500"><I.image/></div>
+      <h2 className="text-xl font-semibold text-gray-800 mb-2">拖入图片开始处理</h2>
+      <p className="text-sm text-gray-400 mb-5">支持 JPG、PNG、WEBP，可批量处理</p>
+      <div className="flex items-center justify-center gap-5 mb-5 text-xs text-gray-400">
+        <span className="flex items-center gap-1.5"><I.upload/>拖拽</span>
+        <span className="flex items-center gap-1.5"><I.clipboard/>Ctrl+V</span>
+        <span className="flex items-center gap-1.5"><I.folder/>选择</span>
       </div>
       <UploadZone isButton/>
     </div>
@@ -185,22 +185,22 @@ function EmptyState(){
 // 显示缩略图、文件名、大小、压缩率，支持选中/删除
 function ImageCard({image,selected,isActive}){
   const s=image.cSize?((1-image.cSize/image.size)*100).toFixed(0):null;
-  return <div className={`flex items-center gap-2 p-1.5 rounded-lg transition-colors group animate-fade-up ${isActive?'bg-blue-50 border border-blue-200':'hover:bg-gray-50 border border-transparent'}`}>
+  return <div className={`flex items-center gap-2 p-2 rounded-lg transition-colors group animate-fade-up ${isActive?'bg-blue-50 border border-blue-200':'hover:bg-gray-50 border border-transparent'}`}>
     <div onClick={e=>{e.stopPropagation();toggleSel(image.id)}} className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all ${selected?'bg-blue-500 border-blue-500':'border-gray-300 hover:border-blue-400'}`}>
       {selected&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
     </div>
-    <div onClick={()=>setPreviewImg(image)} className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
-      <div className="w-9 h-9 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={image.thumb} alt="" className="w-full h-full object-cover"/></div>
+    <div onClick={()=>setPreviewImg(image)} className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer">
+      <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={image.thumb} alt="" className="w-full h-full object-cover"/></div>
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] text-gray-800 truncate">{image.name}</p>
+        <p className="text-sm text-gray-800 truncate">{image.name}</p>
         <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="text-[11px] text-gray-400">{fmt(image.size)}</span>
-          {s&&<span className="text-[11px] text-green-500">-{s}%</span>}
+          <span className="text-xs text-gray-400">{fmt(image.size)}</span>
+          {s&&<span className="text-xs text-green-500">-{s}%</span>}
         </div>
       </div>
     </div>
-    {image.status==='done'&&<span className="text-[11px] text-green-500">✓</span>}
-    {image.status==='error'&&<span className="text-[11px] text-red-400">✗</span>}
+    {image.status==='done'&&<span className="text-xs text-green-500">✓</span>}
+    {image.status==='error'&&<span className="text-xs text-red-400">✗</span>}
     <button onClick={e=>{e.stopPropagation();rmImg(image.id)}} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-all"><I.x/></button>
   </div>;
 }
@@ -278,30 +278,30 @@ function CompressPanel(){
     // 压缩完成后弹出预览窗口
     if(results.length)setPreview({type:'compress',items:results});
   };
-  return <div className="h-full flex flex-col p-4 gap-3 overflow-y-auto animate-fade-up">
-    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-3"><p className="text-sm font-medium text-gray-700">压缩设置</p>{sel.size>0&&<span className="text-[11px] text-blue-500">已选 {sel.size} 张</span>}</div>
+  return <div className="h-full flex flex-col p-4 gap-3 animate-fade-up overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm flex-shrink-0">
+      <div className="flex items-center justify-between mb-3"><p className="text-base font-medium text-gray-700">压缩设置</p>{sel.size>0&&<span className="text-xs text-blue-500">已选 {sel.size} 张</span>}</div>
       <div className="grid grid-cols-2 gap-3">
-        <div><label className="text-xs text-gray-500 mb-1 block">目标大小</label><div className="flex items-center gap-1.5"><input type="number" value={ts} onChange={e=>setTs(Number(e.target.value))} className="flex-1 h-8 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all"/><button onClick={()=>setUnit(u=>u==='KB'?'MB':'KB')} className="h-8 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600 hover:bg-gray-100 transition-colors font-medium min-w-[52px] flex items-center justify-center gap-0.5">{unit}<I.chevDown/></button></div></div>
-        <div><label className="text-xs text-gray-500 mb-1 block">输出格式</label><select value={fmt2} onChange={e=>setFmt2(e.target.value)} className="w-full h-8 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600 outline-none cursor-pointer hover:bg-gray-100 transition-colors"><option value="keep">保持原格式</option><option value="jpg">JPG</option><option value="png">PNG</option><option value="webp">WEBP</option></select></div>
+        <div><label className="text-xs text-gray-500 mb-1 block">目标大小</label><div className="flex items-center gap-1.5"><input type="number" value={ts} onChange={e=>setTs(Number(e.target.value))} className="flex-1 h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all"/><button onClick={()=>setUnit(u=>u==='KB'?'MB':'KB')} className="h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600 hover:bg-gray-100 transition-colors font-medium min-w-[52px] flex items-center justify-center gap-0.5">{unit}<I.chevDown/></button></div></div>
+        <div><label className="text-xs text-gray-500 mb-1 block">输出格式</label><select value={fmt2} onChange={e=>setFmt2(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600 outline-none cursor-pointer hover:bg-gray-100 transition-colors"><option value="keep">保持原格式</option><option value="jpg">JPG</option><option value="png">PNG</option><option value="webp">WEBP</option></select></div>
       </div>
     </div>
-    {dn>0&&<div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm animate-fade-up">
-      <div className="flex items-center gap-1.5 mb-2.5"><span className="text-green-500"><I.trending/></span><p className="text-sm font-medium text-gray-700">压缩统计</p></div>
-      <div className="grid grid-cols-3 gap-3"><div><p className="text-[11px] text-gray-400">原始</p><p className="text-sm font-semibold text-gray-800">{fmt(tot)}</p></div><div><p className="text-[11px] text-gray-400">压缩后</p><p className="text-sm font-semibold text-blue-500">{fmt(comp)}</p></div><div><p className="text-[11px] text-gray-400">节省</p><p className="text-sm font-semibold text-green-500">{sv}%</p></div></div>
+    {dn>0&&<div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm animate-fade-up flex-shrink-0">
+      <div className="flex items-center gap-1.5 mb-2.5"><span className="text-green-500"><I.trending/></span><p className="text-base font-medium text-gray-700">压缩统计</p></div>
+      <div className="grid grid-cols-3 gap-3"><div><p className="text-xs text-gray-400">原始</p><p className="text-base font-semibold text-gray-800">{fmt(tot)}</p></div><div><p className="text-xs text-gray-400">压缩后</p><p className="text-base font-semibold text-blue-500">{fmt(comp)}</p></div><div><p className="text-xs text-gray-400">节省</p><p className="text-base font-semibold text-green-500">{sv}%</p></div></div>
       <Progress value={dn/targets.length*100} label={`${dn}/${targets.length}`} className="mt-2.5"/>
     </div>}
-    <div className="flex-1 space-y-1">
-      <p className="text-[11px] text-gray-400 mb-1">图片列表 ({targets.length})</p>
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+      <p className="text-xs text-gray-400 mb-1">图片列表 ({targets.length})</p>
       {targets.map((img,i)=><div key={img.id} className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-gray-100 hover:border-gray-200 transition-all animate-fade-up" style={{animationDelay:`${i*25}ms`}}>
-        <div className="w-8 h-8 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" className="w-full h-full object-cover"/></div>
-        <div className="flex-1 min-w-0"><p className="text-[13px] text-gray-700 truncate">{img.name}</p><div className="flex items-center gap-1.5 mt-0.5"><span className="text-[11px] text-gray-400">{fmt(img.size)}</span>{img.cSize&&<><span className="text-[10px] text-gray-300">→</span><span className="text-[11px] text-blue-500">{fmt(img.cSize)}</span></>}</div></div>
+        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" className="w-full h-full object-cover"/></div>
+        <div className="flex-1 min-w-0"><p className="text-sm text-gray-700 truncate">{img.name}</p><div className="flex items-center gap-1.5 mt-0.5"><span className="text-xs text-gray-400">{fmt(img.size)}</span>{img.cSize&&<><span className="text-xs text-gray-300">→</span><span className="text-xs text-blue-500">{fmt(img.cSize)}</span></>}</div></div>
         {img.status==='compressing'&&<Progress value={img.progress||0} className="w-16"/>}
-        {img.status==='done'&&<span className="text-[11px] text-green-500 font-medium">完成</span>}
-        {img.status==='error'&&<span className="text-[11px] text-red-400 font-medium">失败</span>}
+        {img.status==='done'&&<span className="text-xs text-green-500 font-medium">完成</span>}
+        {img.status==='error'&&<span className="text-xs text-red-400 font-medium">失败</span>}
       </div>)}
     </div>
-    <div className="flex items-center gap-2 pt-1"><Btn variant="primary" className="flex-1" onClick={compress} disabled={!targets.length||proc} loading={proc}><I.zap/>{sel.size>0?`压缩选中 (${sel.size})`:'开始压缩'}</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}>清空</Btn></div>
+    <div className="flex items-center gap-2 pt-1 flex-shrink-0"><Btn variant="primary" className="flex-1" onClick={compress} disabled={!targets.length||proc} loading={proc}><I.zap/>{sel.size>0?`压缩选中 (${sel.size})`:'开始压缩'}</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}>清空</Btn></div>
   </div>;
 }
 
@@ -381,6 +381,18 @@ function CropPanel(){
   // cropBox is in image-relative coords — normalize to 0-1
   const getCropCoords=()=>{const r=getImgRect()||{x:0,y:0,w:1,h:1};return{x:cropBox.x/r.w,y:cropBox.y/r.h,w:cropBox.w/r.w,h:cropBox.h/r.h}};
 
+  // 计算给定图片尺寸下，按当前比例/设置的裁剪坐标（归一化 0-1）
+  const calcCropForImage=(imgW,imgH)=>{
+    let ar=ratio||(mode==='social'&&socialPreset?socialPreset.w/socialPreset.h:null);
+    if(mode==='pixels'){const s=Math.min(imgW/pxW,imgH/pxH);return{x:(imgW-pxW*s)/(2*imgW),y:(imgH-pxH*s)/(2*imgH),w:(pxW*s)/imgW,h:(pxH*s)/imgH}}
+    if(mode==='social'&&socialPreset){const s=Math.min(imgW/socialPreset.w,imgH/socialPreset.h);return{x:(imgW-socialPreset.w*s)/(2*imgW),y:(imgH-socialPreset.h*s)/(2*imgH),w:(socialPreset.w*s)/imgW,h:(socialPreset.h*s)/imgH}}
+    if(mode==='percentage'){return{x:(1-pctW/100)/2,y:(1-pctH/100)/2,w:pctW/100,h:pctH/100}}
+    // manual: 居中裁剪 80%，保持比例
+    let cw=imgW*0.8,ch=imgH*0.8;
+    if(ar){if(cw/ch>ar)ch=cw/ar;else cw=ch*ar;if(cw>imgW){cw=imgW;ch=cw/ar}if(ch>imgH){ch=imgH;cw=ch*ar}}
+    return{x:(imgW-cw)/(2*imgW),y:(imgH-ch)/(2*imgH),w:cw/imgW,h:ch/imgH};
+  };
+
   const handleDown=(e,type)=>{
     e.preventDefault();e.stopPropagation();setDragging(type);
     ds.current={mx:e.clientX,my:e.clientY,cx:cropBox.x,cy:cropBox.y,cw:cropBox.w,ch:cropBox.h};
@@ -412,9 +424,9 @@ function CropPanel(){
   },[dragging,ratio,mode,socialPreset]);
 
   // ==================== 执行裁剪（Canvas 绘制） ====================
-  const doCrop=async(srcFile)=>{
+  const doCrop=async(srcFile,customCoords)=>{
     const bmp=await createImageBitmap(srcFile);
-    const c=getCropCoords(); // 获取归一化后的裁剪坐标 (0~1)
+    const c=customCoords||getCropCoords(); // 使用传入的坐标或当前预览的归一化坐标
     // 将归一化坐标转为实际像素坐标
     const sx=Math.round(c.x*bmp.width),sy=Math.round(c.y*bmp.height);
     const dw=Math.round(c.w*bmp.width),dh=Math.round(c.h*bmp.height);
@@ -437,9 +449,7 @@ function CropPanel(){
     if(!img)return;setProcessing(true);
     try{
       const cropped=await doCrop(img.blob||img.file);
-      const baseName=img.name.replace(/\.[^.]+$/,'');
-      const dlName=baseName+'_cropped.'+ext(cropped.type);
-      saveAs(cropped, dlName);
+      saveAs(cropped, img.name);
     }catch(e){console.error('Crop failed:',e)}
     setProcessing(false);
   };
@@ -452,16 +462,18 @@ function CropPanel(){
       const t=targets[0];
       try{
         const cropped=await doCrop(t.blob||t.file);
-        const baseName=t.name.replace(/\.[^.]+$/,'');
-        saveAs(cropped, baseName+'_cropped.'+ext(cropped.type));
+        saveAs(cropped, t.name);
       }catch(e){}
     } else if(targets.length>1){
       const zip=new JSZip();
-      for(const img of targets){
+      for(const t of targets){
         try{
-          const cropped=await doCrop(img.blob||img.file);
-          const baseName=img.name.replace(/\.[^.]+$/,'');
-          zip.file(baseName+'_cropped.'+ext(cropped.type), cropped);
+          // 统一模式：为每张图片独立计算裁剪坐标
+          const bmp=await createImageBitmap(t.blob||t.file);
+          const cc=calcCropForImage(bmp.width,bmp.height);
+          bmp.close();
+          const cropped=await doCrop(t.blob||t.file,cc);
+          zip.file(t.name, cropped);
         }catch(e){}
       }
       saveAs(await zip.generateAsync({type:'blob'}), 'cropped_images.zip');
@@ -476,12 +488,10 @@ function CropPanel(){
       const origState={file:img.file,blob:img.blob,thumb:img.thumb,cSize:img.cSize,cUrl:img.cUrl};
       const cropped=await doCrop(img.blob||img.file);
       if(img.cUrl)URL.revokeObjectURL(img.cUrl);
-      const baseName=img.name.replace(/\.[^.]+$/,'');
-      const dlName=baseName+'_cropped.'+ext(cropped.type);
-      const newFile=new File([cropped],dlName,{type:cropped.type});
+      const newFile=new File([cropped],img.name,{type:cropped.type});
       const url=URL.createObjectURL(cropped);
       upd(img.id,{file:newFile,blob:cropped,thumb:url,cSize:cropped.size,cUrl:url,status:'idle'});
-      setCropResults([{name:dlName,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState}]);
+      setCropResults([{name:img.name,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState}]);
     }catch(e){console.error('Crop preview failed:',e)}
     setProcessing(false);
   };
@@ -494,14 +504,16 @@ function CropPanel(){
     for(const img of targets){
       try{
         const origState={file:img.file,blob:img.blob,thumb:img.thumb,cSize:img.cSize,cUrl:img.cUrl};
-        const cropped=await doCrop(img.blob||img.file);
+        // 统一模式：为每张图片独立计算裁剪坐标
+        const bmp=await createImageBitmap(img.blob||img.file);
+        const cc=calcCropForImage(bmp.width,bmp.height);
+        bmp.close();
+        const cropped=await doCrop(img.blob||img.file,cc);
         if(img.cUrl)URL.revokeObjectURL(img.cUrl);
-        const baseName=img.name.replace(/\.[^.]+$/,'');
-        const dlName=baseName+'_cropped.'+ext(cropped.type);
-        const newFile=new File([cropped],dlName,{type:cropped.type});
+        const newFile=new File([cropped],img.name,{type:cropped.type});
         const url=URL.createObjectURL(cropped);
         upd(img.id,{file:newFile,blob:cropped,thumb:url,cSize:cropped.size,cUrl:url,status:'idle'});
-        results.push({name:dlName,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState});
+        results.push({name:img.name,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState});
       }catch(e){}
     }
     if(results.length)setCropResults(results);
@@ -512,16 +524,28 @@ function CropPanel(){
   const handleApplyCrop=batchMode==='uniform'?applyCropAllDirect:applyCropDirect;
   const handlePreviewCrop=batchMode==='uniform'?previewCropAll:previewCropSingle;
 
-  // 重置：恢复原图并重置裁剪框
+  // 重置：统一模式 + 多选 → 恢复所有选中图片的原图；否则只恢复当前图片
   const resetCrop=()=>{
     const imgEl=imgRef.current,cont=containerRef.current;
     if(!imgEl||!cont)return;
-    // 如果图片已经被裁剪过，恢复原图
+    setCropResults(null);
+    // 统一模式 + 多选：恢复所有选中图片的原图
+    if(batchMode==='uniform'&&sel.size>1){
+      const targets=images.filter(i=>sel.has(i.id));
+      targets.forEach(t=>{
+        if(t.origFile&&t.file!==t.origFile){
+          if(t.cUrl)URL.revokeObjectURL(t.cUrl);
+          const newUrl=URL.createObjectURL(t.origFile);
+          upd(t.id,{file:t.origFile,blob:t.origFile,thumb:newUrl,cSize:null,cUrl:null});
+        }
+      });
+      return;
+    }
+    // 单独模式或单张：只恢复当前图片
     if(img.origFile&&img.file!==img.origFile){
       if(img.cUrl)URL.revokeObjectURL(img.cUrl);
       const newUrl=URL.createObjectURL(img.origFile);
       upd(img.id,{file:img.origFile,blob:img.origFile,thumb:newUrl,cSize:null,cUrl:null});
-      setCropResults(null); // 清除裁剪结果面板
       return;
     }
     // 已经是原图，只重置裁剪框到默认的 80% 居中状态
@@ -548,36 +572,36 @@ function CropPanel(){
 
   return <div className="h-full flex flex-col overflow-hidden animate-fade-up">
     {/* Mode Tabs */}
-    <div className="flex items-center gap-1 px-4 py-2 bg-white border-b border-gray-100 flex-shrink-0">
+    <div className="flex items-center gap-1 px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
       {[{id:'manual',l:'手动'},{id:'percentage',l:'百分比'},{id:'pixels',l:'像素'},{id:'social',l:'社媒'},{id:'shape',l:'形状'}].map(m=>
-        <button key={m.id} onClick={()=>setMode(m.id)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${mode===m.id?'bg-blue-500 text-white':'text-gray-500 hover:bg-gray-100'}`}>{m.l}</button>
+        <button key={m.id} onClick={()=>setMode(m.id)} className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${mode===m.id?'bg-blue-500 text-white':'text-gray-500 hover:bg-gray-100'}`}>{m.l}</button>
       )}
       <div className="flex-1"/>
       <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
-        <button onClick={()=>setBatchMode('uniform')} className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${batchMode==='uniform'?'bg-white text-gray-800 shadow-sm':'text-gray-500'}`}>统一裁剪</button>
-        <button onClick={()=>setBatchMode('individual')} className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${batchMode==='individual'?'bg-white text-gray-800 shadow-sm':'text-gray-500'}`}>单独裁剪</button>
+        <button onClick={()=>setBatchMode('uniform')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${batchMode==='uniform'?'bg-white text-gray-800 shadow-sm':'text-gray-500'}`}>统一裁剪</button>
+        <button onClick={()=>setBatchMode('individual')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${batchMode==='individual'?'bg-white text-gray-800 shadow-sm':'text-gray-500'}`}>单独裁剪</button>
       </div>
     </div>
 
     {/* Controls */}
     <div className="px-4 py-3 bg-white border-b border-gray-100 flex-shrink-0">
       {mode==='manual'&&<div className="flex flex-wrap gap-1.5">
-        {RATIO_PRESETS.map(p=><button key={p.l} onClick={()=>setRatio(p.v)} className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all border ${ratio===p.v?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}>{p.l}</button>)}
+        {RATIO_PRESETS.map(p=><button key={p.l} onClick={()=>setRatio(p.v)} className={`px-3 py-2 rounded-lg text-sm font-medium transition-all border ${ratio===p.v?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}>{p.l}</button>)}
       </div>}
       {mode==='percentage'&&<div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500 w-8">宽%</span><input type="range" min="1" max="100" value={pctW} onChange={e=>setPctW(Number(e.target.value))} className="flex-1"/><input type="number" value={pctW} onChange={e=>setPctW(Math.min(100,Math.max(1,Number(e.target.value))))} className="w-16 h-7 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/></div>
-        <div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500 w-8">高%</span><input type="range" min="1" max="100" value={pctH} onChange={e=>setPctH(Number(e.target.value))} className="flex-1"/><input type="number" value={pctH} onChange={e=>setPctH(Math.min(100,Math.max(1,Number(e.target.value))))} className="w-16 h-7 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/></div>
+        <div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500 w-8">宽%</span><input type="range" min="1" max="100" value={pctW} onChange={e=>setPctW(Number(e.target.value))} className="flex-1"/><input type="number" value={pctW} onChange={e=>setPctW(Math.min(100,Math.max(1,Number(e.target.value))))} className="w-16 h-8 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/></div>
+        <div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500 w-8">高%</span><input type="range" min="1" max="100" value={pctH} onChange={e=>setPctH(Number(e.target.value))} className="flex-1"/><input type="number" value={pctH} onChange={e=>setPctH(Math.min(100,Math.max(1,Number(e.target.value))))} className="w-16 h-8 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/></div>
       </div>}
       {mode==='pixels'&&<div className="flex items-center gap-4">
-        <div className="flex items-center gap-2"><span className="text-xs text-gray-500">宽</span><input type="number" value={pxW} onChange={e=>setPxW(Math.min(10000,Math.max(1,Number(e.target.value))))} className="w-20 h-7 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/><span className="text-[10px] text-gray-400">px</span></div>
+        <div className="flex items-center gap-2"><span className="text-xs text-gray-500">宽</span><input type="number" value={pxW} onChange={e=>setPxW(Math.min(10000,Math.max(1,Number(e.target.value))))} className="w-20 h-8 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/><span className="text-xs text-gray-400">px</span></div>
         <span className="text-gray-300">×</span>
-        <div className="flex items-center gap-2"><span className="text-xs text-gray-500">高</span><input type="number" value={pxH} onChange={e=>setPxH(Math.min(10000,Math.max(1,Number(e.target.value))))} className="w-20 h-7 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/><span className="text-[10px] text-gray-400">px</span></div>
+        <div className="flex items-center gap-2"><span className="text-xs text-gray-500">高</span><input type="number" value={pxH} onChange={e=>setPxH(Math.min(10000,Math.max(1,Number(e.target.value))))} className="w-20 h-8 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/><span className="text-xs text-gray-400">px</span></div>
       </div>}
       {mode==='social'&&<div className="grid grid-cols-4 gap-1.5 max-h-24 overflow-y-auto">
-        {SOCIAL_PRESETS.map(p=><button key={p.l} onClick={()=>setSocialPreset(p)} className={`px-2 py-1.5 rounded-lg text-[11px] font-medium transition-all border text-left ${socialPreset?.l===p.l?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}><div>{p.l}</div><div className="text-[10px] text-gray-400">{p.w}×{p.h}</div></button>)}
+        {SOCIAL_PRESETS.map(p=><button key={p.l} onClick={()=>setSocialPreset(p)} className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-all border text-left ${socialPreset?.l===p.l?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}><div>{p.l}</div><div className="text-[11px] text-gray-400">{p.w}×{p.h}</div></button>)}
       </div>}
       {mode==='shape'&&<div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5">{SHAPE_OPTS.map(s=><button key={s.v} onClick={()=>setShape(s.v)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${shape===s.v?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}><s.icon/>{s.l}</button>)}</div>
+        <div className="flex items-center gap-1.5">{SHAPE_OPTS.map(s=><button key={s.v} onClick={()=>setShape(s.v)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all border ${shape===s.v?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}><s.icon/>{s.l}</button>)}</div>
         {shape==='rounded'&&<div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500">圆角</span><input type="range" min="5" max="100" value={borderRadius} onChange={e=>setBorderRadius(Number(e.target.value))} className="flex-1"/><span className="text-xs text-gray-500 w-8">{borderRadius}px</span></div>}
       </div>}
     </div>
@@ -604,7 +628,7 @@ function CropPanel(){
     </div>
 
     {/* Nav + Apply */}
-    <div className="flex items-center justify-between px-4 py-2.5">
+    <div className="flex items-center justify-between px-4 py-3">
       <div className="flex items-center gap-2">
         <Btn variant="ghost" size="sm" onClick={()=>{const i=Math.max(0,idx-1);setIdx(i);setPreviewImg(images[i])}} disabled={idx===0}>上一张</Btn>
         <span className="text-xs text-gray-500">{idx+1}/{images.length}</span>
@@ -625,25 +649,28 @@ function DownloadPanel(){
   // 已处理（有 blob）的图片、原始总大小、压缩后总大小、节省比例
   const proc=images.filter(i=>i.blob);const tot=images.reduce((a,i)=>a+i.size,0);
   const comp=proc.reduce((a,i)=>a+(i.cSize||i.size),0);const sv=comp>0?((1-comp/tot)*100).toFixed(1):0;
-  const dl=img=>{const b=img.blob||img.file;saveAs(b,img.name.replace(/\.[^.]+$/,'')+'.'+ext(b.type||img.type))};
-  const dlAll=async()=>{if(!proc.length)return;const zip=new JSZip();proc.forEach(img=>{const b=img.blob||img.file;zip.file(img.name.replace(/\.[^.]+$/,'')+'.'+ext(b.type||img.type),b)});saveAs(await zip.generateAsync({type:'blob'}),'images.zip')};
+  const dl=img=>{const b=img.blob||img.file;saveAs(b,img.name)};
+  const dlAll=async()=>{if(!proc.length)return;const zip=new JSZip();proc.forEach(img=>{const b=img.blob||img.file;zip.file(img.name,b)});saveAs(await zip.generateAsync({type:'blob'}),'images.zip')};
   return <div className="h-full flex flex-col p-4 gap-3 overflow-y-auto animate-fade-up">
     <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
-      <p className="text-sm font-medium text-gray-700 mb-2.5">下载概览</p>
-      <div className="grid grid-cols-3 gap-3"><div><p className="text-[11px] text-gray-400">总图片</p><p className="text-lg font-semibold text-gray-800">{images.length}</p></div><div><p className="text-[11px] text-gray-400">已处理</p><p className="text-lg font-semibold text-blue-500">{proc.length}</p></div><div><p className="text-[11px] text-gray-400">压缩率</p><p className="text-lg font-semibold text-green-500">{sv}%</p></div></div>
+      <p className="text-base font-medium text-gray-700 mb-2.5">下载概览</p>
+      <div className="grid grid-cols-3 gap-3"><div><p className="text-xs text-gray-400">总图片</p><p className="text-xl font-semibold text-gray-800">{images.length}</p></div><div><p className="text-xs text-gray-400">已处理</p><p className="text-xl font-semibold text-blue-500">{proc.length}</p></div><div><p className="text-xs text-gray-400">压缩率</p><p className="text-xl font-semibold text-green-500">{sv}%</p></div></div>
     </div>
     <div className="flex-1">
-      <div className="flex items-center px-3 py-1.5 text-[11px] text-gray-400 font-medium border-b border-gray-100"><span className="flex-1">文件名</span><span className="w-16 text-right">原始</span><span className="w-16 text-right">处理后</span><span className="w-12 text-right">节省</span><span className="w-12 text-right">操作</span></div>
-      <div className="space-y-0.5">{images.map((img,i)=>{const has=!!img.blob;const s=has&&img.cSize?((1-img.cSize/img.size)*100).toFixed(0):null;return<div key={img.id} className="flex items-center px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors animate-fade-up" style={{animationDelay:`${i*20}ms`}}>
-        <div className="flex-1 flex items-center gap-2 min-w-0"><div className="w-7 h-7 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" className="w-full h-full object-cover"/></div><span className="text-[13px] text-gray-700 truncate">{img.name}</span></div>
-        <span className="w-16 text-right text-[11px] text-gray-400">{fmt(img.size)}</span>
-        <span className="w-16 text-right text-[11px] text-gray-500">{has?fmt(img.cSize||img.size):'-'}</span>
-        <span className="w-12 text-right text-[11px] text-green-500 font-medium">{s?s+'%':'-'}</span>
-        <div className="w-12 text-right">{has&&<button onClick={()=>dl(img)} className="text-[11px] text-blue-500 hover:text-blue-700 font-medium">下载</button>}</div>
+      <div className="flex items-center px-3 py-2 text-xs text-gray-400 font-medium border-b border-gray-100"><span className="flex-1">文件名</span><span className="w-16 text-right">原始</span><span className="w-16 text-right">处理后</span><span className="w-12 text-right">节省</span><span className="w-12 text-right">操作</span></div>
+      <div className="space-y-0.5">{images.map((img,i)=>{const has=!!img.blob;const s=has&&img.cSize?((1-img.cSize/img.size)*100).toFixed(0):null;return<div key={img.id} className="flex items-center px-3 py-2.5 rounded-lg hover:bg-gray-50 transition-colors animate-fade-up" style={{animationDelay:`${i*20}ms`}}>
+        <div className="flex-1 flex items-center gap-2 min-w-0"><div className="w-8 h-8 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" className="w-full h-full object-cover"/></div><span className="text-sm text-gray-700 truncate">{img.name}</span></div>
+        <span className="w-16 text-right text-xs text-gray-400">{fmt(img.size)}</span>
+        <span className="w-16 text-right text-xs text-gray-500">{has?fmt(img.cSize||img.size):'-'}</span>
+        <span className="w-12 text-right text-xs text-green-500 font-medium">{s?s+'%':'-'}</span>
+        <div className="w-16 text-right flex items-center justify-end gap-1">
+          {has&&<button onClick={()=>dl(img)} className="text-xs text-blue-500 hover:text-blue-700 font-medium">下载</button>}
+          <button onClick={()=>rmImg(img.id)} className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors"><I.x/></button>
+        </div>
       </div>})}
       </div>
     </div>
-    <div><Btn variant="primary" className="w-full" onClick={dlAll} disabled={!proc.length}><I.download/>下载全部 (ZIP)</Btn></div>
+    <div className="flex items-center gap-2"><Btn variant="primary" className="flex-1" onClick={dlAll} disabled={!proc.length}><I.download/>下载全部 (ZIP)</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}><I.trash/>清空全部</Btn></div>
   </div>;
 }
 
@@ -651,10 +678,12 @@ function DownloadPanel(){
 // 显示处理前后对比，支持移除/恢复，单张直接下载，多张打包 ZIP
 function PreviewModal(){
   const{preview}=useStore();
-  const[removed,setRemoved]=useState(new Set()); // 已移除的结果索引
+  const[removed,setRemoved]=useState(new Set());
+  const[names,setNames]=useState(()=>preview?preview.items.map(it=>it.name):[]);
+  useEffect(()=>{if(preview)setNames(preview.items.map(it=>it.name))},[preview]);
   if(!preview)return null;
   const{items,type}=preview;
-  const kept=items.filter((_,i)=>!removed.has(i));
+  const keptIdx=items.map((_,i)=>i).filter(i=>!removed.has(i));
   const close=()=>{
     items.forEach((item,i)=>{
       if(removed.has(i)&&item.imgId&&item.origState){
@@ -664,10 +693,11 @@ function PreviewModal(){
     setPreview(null);
   };
   const toggleRemove=i=>setRemoved(s=>{const n=new Set(s);n.has(i)?n.delete(i):n.add(i);return n});
+  const updateName=(i,v)=>setNames(prev=>{const n=[...prev];n[i]=v;return n});
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-up" onClick={close}>
     <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 max-h-[85vh] flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-        <h3 className="text-sm font-semibold text-gray-800">{type==='compress'?'压缩结果':'裁剪结果'} ({kept.length}/{items.length} 保留)</h3>
+        <h3 className="text-base font-semibold text-gray-800">{type==='compress'?'压缩结果':'裁剪结果'} ({keptIdx.length}/{items.length} 保留)</h3>
         <button onClick={close} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"><I.x/></button>
       </div>
       <div className="flex-1 overflow-y-auto p-5">
@@ -676,21 +706,22 @@ function PreviewModal(){
             const isOff=removed.has(i);
             return <div key={i} className={`relative bg-gray-50 rounded-xl p-3 animate-fade-up transition-all ${isOff?'opacity-40 grayscale':'hover:shadow-md'}`} style={{animationDelay:`${i*60}ms`}}>
               <button onClick={()=>toggleRemove(i)} className={`absolute top-2 right-2 z-10 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs transition-all ${isOff?'bg-gray-400 hover:bg-gray-500':'bg-red-400 hover:bg-red-500'}`} title={isOff?'恢复此图':'移除此结果'}><I.x/></button>
-              <p className={`text-[13px] font-medium truncate mb-2 ${isOff?'text-gray-400 line-through':'text-gray-700'}`}>{item.name}</p>
+              <input type="text" value={names[i]||item.name} onChange={e=>updateName(i,e.target.value)}
+                className={`w-full text-sm font-medium mb-2 px-2 py-1.5 rounded border bg-white outline-none transition-all ${isOff?'text-gray-400 line-through border-transparent':'text-gray-700 border-gray-200 focus:border-blue-400'}`}/>
               <div className="flex gap-3 mb-3">
                 <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-200">
                   <img src={item.origUrl} alt="" className="w-full h-40 object-contain"/>
-                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/50 text-white text-[10px]">原图</span>
+                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/50 text-white text-[11px]">原图</span>
                 </div>
                 <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-200">
                   <img src={item.resultUrl} alt="" className="w-full h-40 object-contain"/>
-                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-blue-500/80 text-white text-[10px]">{type==='compress'?'压缩后':'裁剪后'}</span>
+                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-blue-500/80 text-white text-[11px]">{type==='compress'?'压缩后':'裁剪后'}</span>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center">
-                <div><p className="text-[10px] text-gray-400">原始大小</p><p className="text-xs font-semibold text-gray-700">{fmt(item.origSize)}</p></div>
-                <div><p className="text-[10px] text-gray-400">处理后</p><p className="text-xs font-semibold text-blue-500">{fmt(item.resultSize)}</p></div>
-                <div><p className="text-[10px] text-gray-400">节省空间</p><p className="text-xs font-semibold text-green-500">{item.saving}</p></div>
+                <div><p className="text-[11px] text-gray-400">原始大小</p><p className="text-xs font-semibold text-gray-700">{fmt(item.origSize)}</p></div>
+                <div><p className="text-[11px] text-gray-400">处理后</p><p className="text-xs font-semibold text-blue-500">{fmt(item.resultSize)}</p></div>
+                <div><p className="text-[11px] text-gray-400">节省空间</p><p className="text-xs font-semibold text-green-500">{item.saving}</p></div>
               </div>
             </div>;
           })}
@@ -698,11 +729,11 @@ function PreviewModal(){
       </div>
       <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
         <Btn variant="ghost" size="sm" onClick={close}>关闭</Btn>
-        <Btn variant="primary" size="sm" disabled={!kept.length} onClick={async()=>{
-          if(kept.length===1){saveAs(kept[0].blob,kept[0].name)}
-          else{const zip=new JSZip();kept.forEach(it=>zip.file(it.name,it.blob));saveAs(await zip.generateAsync({type:'blob'}),'images.zip')}
+        <Btn variant="primary" size="sm" disabled={!keptIdx.length} onClick={async()=>{
+          if(keptIdx.length===1){const i=keptIdx[0];saveAs(items[i].blob,names[i]||items[i].name)}
+          else{const zip=new JSZip();keptIdx.forEach(i=>zip.file(names[i]||items[i].name,items[i].blob));saveAs(await zip.generateAsync({type:'blob'}),'images.zip')}
           close()
-        }}><I.download/>下载保留项 ({kept.length})</Btn>
+        }}><I.download/>下载保留项 ({keptIdx.length})</Btn>
       </div>
     </div>
   </div>;
@@ -713,18 +744,21 @@ function PreviewModal(){
 function CropResultsPanel(){
   const{cropResults}=useStore();
   const[removed,setRemoved]=useState(new Set());
+  const[names,setNames]=useState(()=>cropResults?cropResults.map(it=>it.name):[]);
+  useEffect(()=>{if(cropResults)setNames(cropResults.map(it=>it.name))},[cropResults]);
   if(!cropResults||!cropResults.length)return null;
-  const kept=cropResults.filter((_,i)=>!removed.has(i));
+  const keptIdx=cropResults.map((_,i)=>i).filter(i=>!removed.has(i));
   const toggleRemove=i=>setRemoved(s=>{const n=new Set(s);n.has(i)?n.delete(i):n.add(i);return n});
+  const updateName=(i,v)=>setNames(prev=>{const n=[...prev];n[i]=v;return n});
   const downloadAll=async()=>{
-    if(kept.length===1){saveAs(kept[0].blob,kept[0].name);return}
-    if(kept.length>1){const zip=new JSZip();kept.forEach(it=>zip.file(it.name,it.blob));saveAs(await zip.generateAsync({type:'blob'}),'cropped_images.zip')}
+    if(keptIdx.length===1){const i=keptIdx[0];saveAs(cropResults[i].blob,names[i]||cropResults[i].name);return}
+    if(keptIdx.length>1){const zip=new JSZip();keptIdx.forEach(i=>zip.file(names[i]||cropResults[i].name,cropResults[i].blob));saveAs(await zip.generateAsync({type:'blob'}),'images.zip')}
   };
   return <div className="flex-1 flex flex-col bg-[#f5f7fa] overflow-hidden">
-    <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-100 flex-shrink-0">
+    <div className="flex items-center justify-between px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">裁剪预览</span>
-        <span className="text-[11px] text-gray-400">{kept.length}/{cropResults.length} 保留</span>
+        <span className="text-base font-medium text-gray-700">裁剪预览</span>
+        <span className="text-xs text-gray-400">{keptIdx.length}/{cropResults.length} 保留</span>
       </div>
       <button onClick={()=>setCropResults(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"><I.x/></button>
     </div>
@@ -732,33 +766,34 @@ function CropResultsPanel(){
       {cropResults.map((item,i)=>{
         const isOff=removed.has(i);
         return <div key={i} className={`bg-white rounded-xl border border-gray-100 p-3 transition-all ${isOff?'opacity-40 grayscale':'hover:shadow-md'}`}>
-          <div className="flex items-center justify-between mb-2">
-            <p className={`text-[13px] font-medium truncate ${isOff?'text-gray-400 line-through':'text-gray-700'}`}>{item.name}</p>
-            <button onClick={()=>toggleRemove(i)} className={`p-1 rounded-full transition-colors ${isOff?'bg-gray-200 text-gray-400 hover:bg-gray-300':'bg-red-50 text-red-400 hover:bg-red-100'}`} title={isOff?'恢复此图':'移除此结果'}>
+          <div className="flex items-center gap-2 mb-2">
+            <input type="text" value={names[i]||item.name} onChange={e=>updateName(i,e.target.value)}
+              className={`flex-1 min-w-0 text-sm font-medium px-2 py-1.5 rounded border bg-white outline-none transition-all ${isOff?'text-gray-400 line-through border-transparent':'text-gray-700 border-gray-200 focus:border-blue-400'}`}/>
+            <button onClick={()=>toggleRemove(i)} className={`p-1 rounded-full transition-colors flex-shrink-0 ${isOff?'bg-gray-200 text-gray-400 hover:bg-gray-300':'bg-red-50 text-red-400 hover:bg-red-100'}`} title={isOff?'恢复此图':'移除此结果'}>
               {isOff?<I.plus/>:<I.x/>}
             </button>
           </div>
           <div className="flex gap-2 mb-2">
             <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-100">
               <img src={item.origUrl} alt="" className="w-full h-32 object-contain"/>
-              <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/50 text-white text-[10px]">原图</span>
+              <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/50 text-white text-[11px]">原图</span>
             </div>
             <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-100">
               <img src={item.resultUrl} alt="" className="w-full h-32 object-contain"/>
-              <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-blue-500/80 text-white text-[10px]">裁剪后</span>
+              <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-blue-500/80 text-white text-[11px]">裁剪后</span>
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div><p className="text-[10px] text-gray-400">原始</p><p className="text-xs font-semibold text-gray-700">{fmt(item.origSize)}</p></div>
-            <div><p className="text-[10px] text-gray-400">裁剪后</p><p className="text-xs font-semibold text-blue-500">{fmt(item.resultSize)}</p></div>
-            <div><p className="text-[10px] text-gray-400">节省</p><p className="text-xs font-semibold text-green-500">{item.saving}</p></div>
+            <div><p className="text-[11px] text-gray-400">原始</p><p className="text-xs font-semibold text-gray-700">{fmt(item.origSize)}</p></div>
+            <div><p className="text-[11px] text-gray-400">裁剪后</p><p className="text-xs font-semibold text-blue-500">{fmt(item.resultSize)}</p></div>
+            <div><p className="text-[11px] text-gray-400">节省</p><p className="text-xs font-semibold text-green-500">{item.saving}</p></div>
           </div>
         </div>;
       })}
     </div>
     <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100 bg-white flex-shrink-0">
       <Btn variant="ghost" size="sm" onClick={()=>setCropResults(null)}>关闭</Btn>
-      <Btn variant="primary" size="sm" disabled={!kept.length} onClick={downloadAll}><I.download/>一键下载 ({kept.length})</Btn>
+      <Btn variant="primary" size="sm" disabled={!keptIdx.length} onClick={downloadAll}><I.download/>一键下载 ({keptIdx.length})</Btn>
     </div>
   </div>;
 }
@@ -768,18 +803,18 @@ function ImagePreview(){
   const{images,previewImg,cropResults}=useStore();
   if(cropResults&&cropResults.length)return <CropResultsPanel/>;
   const current=previewImg?images.find(i=>i.id===previewImg.id):null;
-  if(!current)return <div className="flex-1 flex items-center justify-center bg-[#f5f7fa]"><p className="text-sm text-gray-400">点击左侧图片进行预览</p></div>;
+  if(!current)return <div className="flex-1 flex items-center justify-center bg-[#f5f7fa]"><p className="text-base text-gray-400">点击左侧图片进行预览</p></div>;
   const s=current.cSize?((1-current.cSize/current.size)*100).toFixed(0):null;
   return <div className="flex-1 flex flex-col bg-[#f5f7fa] overflow-hidden">
-    <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-100 flex-shrink-0">
+    <div className="flex items-center justify-between px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="text-sm font-medium text-gray-700 truncate">{current.name}</span>
-        <span className="text-[11px] text-gray-400 flex-shrink-0">{fmt(current.size)}</span>
-        {current.cSize&&<span className="text-[11px] text-green-500 flex-shrink-0">→ {fmt(current.cSize)} ({s}%)</span>}
+        <span className="text-base font-medium text-gray-700 truncate">{current.name}</span>
+        <span className="text-xs text-gray-400 flex-shrink-0">{fmt(current.size)}</span>
+        {current.cSize&&<span className="text-xs text-green-500 flex-shrink-0">→ {fmt(current.cSize)} ({s}%)</span>}
       </div>
       <div className="flex items-center gap-1.5 flex-shrink-0">
-        {current.w>0&&<span className="text-[11px] text-gray-400">{current.w}×{current.h}</span>}
-        <span className="text-[11px] text-gray-400 uppercase">{ext(current.type)}</span>
+        {current.w>0&&<span className="text-xs text-gray-400">{current.w}×{current.h}</span>}
+        <span className="text-xs text-gray-400 uppercase">{ext(current.type)}</span>
       </div>
     </div>
     <div className="flex-1 flex items-center justify-center p-4 overflow-hidden">
@@ -813,19 +848,19 @@ function App(){
   };
 
   return <div className="flex flex-col h-screen">
-    <div className="flex items-center h-10 px-5 bg-white border-b border-gray-100 flex-shrink-0">
-      <a href="../../" className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-500 transition-colors mr-4 no-underline">← 工具箱</a>
-      <div className="flex items-center gap-2"><div className="w-5 h-5 rounded bg-blue-500 flex items-center justify-center text-white"><I.image/></div><span className="text-sm font-medium text-gray-700">图片批量处理</span></div>
+    <div className="flex items-center h-12 px-5 bg-white border-b border-gray-100 flex-shrink-0">
+      <a href="../../" className="flex items-center gap-1 text-sm text-gray-400 hover:text-blue-500 transition-colors mr-4 no-underline">← 工具箱</a>
+      <div className="flex items-center gap-2.5"><div className="w-6 h-6 rounded bg-blue-500 flex items-center justify-center text-white"><I.image/></div><span className="text-base font-semibold text-gray-700">图片批量处理</span></div>
     </div>
     <div ref={containerRef} className="flex flex-1 overflow-hidden">
       <div className="flex flex-col bg-white border-r border-gray-100 flex-shrink-0" style={{width:sidebarW}}>
         <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-50">
-          <div className="flex items-center gap-1.5"><span className="text-[13px] font-medium text-gray-700">图片列表</span><span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-500 font-medium">{images.length}</span></div>
-          {images.length>0&&<button onClick={clearAll} className="text-[11px] text-gray-400 hover:text-red-400 transition-colors flex items-center gap-0.5"><I.trash/>清空</button>}
+          <div className="flex items-center gap-1.5"><span className="text-sm font-medium text-gray-700">图片列表</span><span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-500 font-medium">{images.length}</span></div>
+          {images.length>0&&<button onClick={clearAll} className="text-xs text-gray-400 hover:text-red-400 transition-colors flex items-center gap-0.5"><I.trash/>清空</button>}
         </div>
         {images.length>0&&<div className="flex items-center gap-2 px-3 py-2 border-b border-gray-50">
-          <button onClick={selCount===images.length?deselAll:selAll} className="text-[11px] text-blue-500 hover:text-blue-700 font-medium">{selCount===images.length?'取消全选':'全选'}</button>
-          {selCount>0&&<span className="text-[11px] text-gray-400">已选 {selCount}/{images.length}</span>}
+          <button onClick={selCount===images.length?deselAll:selAll} className="text-xs text-blue-500 hover:text-blue-700 font-medium">{selCount===images.length?'取消全选':'全选'}</button>
+          {selCount>0&&<span className="text-xs text-gray-400">已选 {selCount}/{images.length}</span>}
         </div>}
         <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">{images.length===0?<div className="p-1.5"><UploadZone/></div>:images.map(img=><ImageCard key={img.id} image={img} selected={sel.has(img.id)} isActive={previewImg?.id===img.id}/>)}</div>
         {images.length>0&&<div className="p-2 border-t border-gray-50"><UploadZone isButton/></div>}
@@ -833,8 +868,8 @@ function App(){
       <Divider onDrag={handleSidebarDrag}/>
       <div className="flex-1 flex overflow-hidden bg-[#f5f7fa]">
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          <div className="flex items-center gap-1 px-4 py-2 bg-white border-b border-gray-100 flex-shrink-0">
-            {tabs.map(t=><button key={t.id} onClick={()=>{_tab=t.id;notify()}} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${tab===t.id?'bg-blue-500 text-white':'text-gray-500 hover:bg-gray-100'}`}><t.icon/>{t.l}</button>)}
+          <div className="flex items-center gap-1 px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
+            {tabs.map(t=><button key={t.id} onClick={()=>{_tab=t.id;notify()}} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${tab===t.id?'bg-blue-500 text-white':'text-gray-500 hover:bg-gray-100'}`}><t.icon/>{t.l}</button>)}
           </div>
           <div className="flex-1 overflow-hidden">{!has?<EmptyState/>:<div key={tab} className="h-full">{tab==='compress'&&<CompressPanel/>}{tab==='crop'&&<CropPanel/>}{tab==='download'&&<DownloadPanel/>}</div>}</div>
         </div>
@@ -844,9 +879,9 @@ function App(){
         </>}
       </div>
     </div>
-    <div className="flex items-center justify-between h-6 px-5 bg-white border-t border-gray-100 flex-shrink-0">
-      <div className="flex items-center gap-3 text-[11px] text-gray-400"><span>{images.length} 张</span><span>{fmt(tot)}</span>{comp>0&&<span className="text-blue-500">压缩后 {fmt(comp)} ({((1-comp/tot)*100).toFixed(1)}% 节省)</span>}</div>
-      <div className="flex items-center gap-1 text-[11px] text-gray-400"><div className="w-1.5 h-1.5 rounded-full bg-green-400"/>就绪</div>
+    <div className="flex items-center justify-between h-7 px-5 bg-white border-t border-gray-100 flex-shrink-0">
+      <div className="flex items-center gap-3 text-xs text-gray-400"><span>{images.length} 张</span><span>{fmt(tot)}</span>{comp>0&&<span className="text-blue-500">压缩后 {fmt(comp)} ({((1-comp/tot)*100).toFixed(1)}% 节省)</span>}</div>
+      <div className="flex items-center gap-1 text-xs text-gray-400"><div className="w-1.5 h-1.5 rounded-full bg-green-400"/>就绪</div>
     </div>
     {preview&&<PreviewModal/>}
   </div>;

@@ -3,8 +3,6 @@
 import re
 from typing import Dict, Any
 
-import yt_dlp
-
 from ._utils import _make_info, _empty_result, _ok
 
 
@@ -18,6 +16,7 @@ async def parse(url: str) -> Dict[str, Any]:
     vid = m.group(1)
 
     try:
+        import yt_dlp
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,

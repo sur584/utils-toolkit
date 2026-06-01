@@ -2,9 +2,14 @@
 
 import json
 import re
-from typing import Dict, Any
+import logging
+from typing import Dict, Any, Optional
 
-from ._utils import _make_info, _empty_result, _ok
+import httpx
+
+from ._utils import _make_info, _empty_result, _ok, _follow_redirects
+
+logger = logging.getLogger(__name__)
 
 
 DOMAINS = ["channels.weixin.qq.com", "weixin.qq.com"]
@@ -133,6 +138,8 @@ async def parse(url: str) -> Dict[str, Any]:
         return parse_video_info(url)
     elif "channels.weixin.qq.com" in url:
         return parse_url(url)
+    elif "weixin.qq.com/sph/" in url:
+        return await parse_sph_url(url)
     elif url.startswith("http") and ("mp4" in url or "m3u8" in url or "video" in url):
         # 直接是视频 URL
         return _ok(_make_info(
@@ -164,6 +171,7 @@ def parse_url(url: str) -> Dict[str, Any]:
     patterns = [
         r'channels\.weixin\.qq\.com/web/pages/feed/([a-f0-9]+)',
         r'channels\.weixin\.qq\.com/web/pages/feed\?feedId=([a-f0-9]+)',
+        r'channels\.weixin\.qq\.com/finder-preview/pages/sph\?id=([a-zA-Z0-9]+)',
         r'feedId=([a-f0-9]+)',
     ]
 
@@ -179,7 +187,140 @@ def parse_url(url: str) -> Dict[str, Any]:
 
     return {
         "success": False,
-        "message": "视频号链接需要配合抓包工具使用",
+        "message": f"检测到视频号内容 (ID: {video_id})，但需要配合抓包工具获取视频直链",
         "data": None,
         "hint": get_usage_guide(),
     }
+
+
+async def parse_sph_url(url: str) -> Dict[str, Any]:
+    """
+    解析视频号分享链接 (weixin.qq.com/sph/xxxxx)
+
+    1. 跟踪重定向获取最终 URL
+    2. 提取 video_id
+    3. 调用内部 API 获取元数据
+    4. 返回元数据 + 使用说明
+    """
+    try:
+        # 1. 跟踪重定向获取最终 URL
+        final_url = await _follow_redirects(url, timeout=10.0)
+        logger.info(f"[视频号] 重定向后 URL: {final_url}")
+
+        # 2. 提取 video_id
+        video_id = None
+
+        # 从 channels.weixin.qq.com/finder-preview/pages/sph?id=xxx 提取
+        sph_match = re.search(r'sph\?id=([a-zA-Z0-9]+)', final_url)
+        if sph_match:
+            video_id = sph_match.group(1)
+
+        # 从 weixin.qq.com/sph/xxx 提取
+        if not video_id:
+            sph_match = re.search(r'sph/([a-zA-Z0-9]+)', url)
+            if sph_match:
+                video_id = sph_match.group(1)
+
+        if not video_id:
+            return _empty_result("无法从链接中提取视频ID")
+
+        logger.info(f"[视频号] 提取到 video_id: {video_id}")
+
+        # 3. 调用 API 获取元数据
+        metadata = await fetch_video_metadata(video_id)
+
+        if metadata:
+            feed_info = metadata.get('feedInfo', {})
+            author_info = metadata.get('authorInfo', {})
+
+            # 解析点赞数等
+            def parse_count(s):
+                if not s:
+                    return 0
+                s = str(s).replace(',', '')
+                if '万' in s:
+                    return int(float(s.replace('万', '')) * 10000)
+                try:
+                    return int(s)
+                except:
+                    return 0
+
+            # 返回元数据（不含视频直链）
+            # video_url 为空，需要用户通过抓包获取后手动粘贴
+            return _ok(_make_info(
+                id=video_id,
+                platform="wechat_channels",
+                title=feed_info.get('description', '微信视频号'),
+                author=author_info.get('nickname', '未知作者'),
+                author_avatar=author_info.get('headImgUrl', ''),
+                cover=feed_info.get('coverUrl', ''),
+                duration=0,
+                video_url="",  # 视频直链需要抓包获取
+                video_url_no_watermark="",
+                create_time=feed_info.get('createtime', 0),
+                digg_count=parse_count(feed_info.get('likeCountFmt', '0')),
+                comment_count=parse_count(feed_info.get('commentCountFmt', '0')),
+                share_count=parse_count(feed_info.get('forwardCountFmt', '0')),
+            ))
+        else:
+            # API 调用失败，返回提示信息
+            return {
+                "success": False,
+                "message": "已识别为视频号链接，但获取元数据失败。请稍后重试或使用抓包工具",
+                "data": None,
+                "hint": get_usage_guide(),
+            }
+
+    except Exception as e:
+        logger.error(f"[视频号] 解析失败: {e}")
+        return {
+            "success": False,
+            "message": f"处理分享链接失败: {str(e)}",
+            "data": None,
+            "hint": get_usage_guide(),
+        }
+
+
+async def fetch_video_metadata(video_id: str) -> Optional[Dict[str, Any]]:
+    """
+    调用微信内部 API 获取视频元数据
+
+    API: /finder-preview/api/feed/get_feed_info
+    """
+    api_url = 'https://channels.weixin.qq.com/finder-preview/api/feed/get_feed_info'
+
+    payload = {
+        'baseReq': {'generalToken': ''},
+        'shortUri': video_id
+    }
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Content-Type': 'application/json',
+        'Referer': f'https://channels.weixin.qq.com/finder-preview/pages/sph?id={video_id}',
+        'Origin': 'https://channels.weixin.qq.com',
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+            # 先访问页面建立会话
+            page_url = f'https://channels.weixin.qq.com/finder-preview/pages/sph?id={video_id}'
+            await client.get(page_url, headers={
+                'User-Agent': headers['User-Agent'],
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            })
+
+            # 调用 API
+            resp = await client.post(api_url, json=payload, headers=headers)
+            data = resp.json()
+
+            if data.get('errCode') == 0:
+                logger.info(f"[视频号] API 获取元数据成功: {video_id}")
+                return data.get('data')
+            else:
+                logger.warning(f"[视频号] API 返回错误: {data.get('errMsg')}")
+                return None
+
+    except Exception as e:
+        logger.error(f"[视频号] API 调用失败: {e}")
+        return None

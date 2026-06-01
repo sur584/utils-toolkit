@@ -59,3 +59,68 @@
    ```python
    "myplatform": (myplatform.DOMAINS, myplatform.parse),
    ```
+
+## 方式四：AI 模型驱动工具
+
+适用于需要 AI 模型推理的工具（如智能抠图）。参考 `bg-remover` 实现。
+
+### 后端要点
+
+1. **模型管理**：在 `backend/main.py` 中定义模型字典和加载函数
+   ```python
+   BG_MODELS = {
+       "model_name": "模型描述",
+   }
+   
+   def _get_bg_session(model_name: str = None):
+       # 按需加载模型，全局缓存 session
+       ...
+   ```
+
+2. **结果缓存**：使用 LRU 缓存相同输入的结果，避免重复计算
+   ```python
+   _bg_cache = OrderedDict()
+   _BG_CACHE_MAX = 50
+   
+   def _cache_key(data: bytes, model: str, quality: str) -> str:
+       h = hashlib.md5(data).hexdigest()
+       return f"{h}_{model}_{quality}"
+   ```
+
+3. **图片预处理**：统一颜色模式、限制尺寸、检测损坏文件
+   ```python
+   def _preprocess_image(data: bytes, fast: bool = False) -> "Image.Image":
+       from PIL import Image
+       img = Image.open(io.BytesIO(data))
+       img.load()  # 强制解码，检测损坏
+       # 统一颜色模式、限制尺寸...
+   ```
+
+4. **API 设计**：
+   - `GET /api/{tool}/models` — 返回可用模型列表
+   - `POST /api/{tool}` — 单张处理（FormData 上传）
+   - 异步处理 + 超时保护（`asyncio.wait_for` + `asyncio.to_thread`）
+
+### 前端要点
+
+1. **上传区**：支持拖拽、点击、`Ctrl+V` 粘贴
+2. **客户端预缩放**：上传前用 Canvas 缩放，减少传输体积
+3. **预览对比**：支持原图/结果/对比三种视图模式
+4. **手动编辑**：Canvas 画笔擦除/恢复，支持撤销历史
+5. **批量操作**：逐张调用 API，支持全选/批量下载 ZIP
+
+### 新增依赖
+
+在 `requirements.txt` 中添加 AI 相关依赖：
+```
+rembg>=2.0.50
+onnxruntime>=1.16.0
+```
+
+在 `launcher.py` 的 `optional` 列表中注册可选依赖：
+```python
+optional = [
+    ('yt_dlp', 'yt-dlp'),
+    ('rembg', 'rembg'),
+]
+```

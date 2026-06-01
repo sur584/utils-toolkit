@@ -119,6 +119,42 @@ function initEventListeners() {
     if (downloadSelectedBtn) downloadSelectedBtn.addEventListener('click', handleDownloadSelected);
     if (downloadAllImagesBtn) downloadAllImagesBtn.addEventListener('click', handleDownloadAllImages);
     if (copySelectedLinksBtn) copySelectedLinksBtn.addEventListener('click', handleCopySelectedLinks);
+
+    // 手动输入视频URL
+    const applyVideoUrlBtn = document.getElementById('applyVideoUrlBtn');
+    const manualVideoUrlInput = document.getElementById('manualVideoUrlInput');
+    if (applyVideoUrlBtn && manualVideoUrlInput) {
+        applyVideoUrlBtn.addEventListener('click', () => {
+            const url = manualVideoUrlInput.value.trim();
+            if (!url) {
+                showToast('请输入视频URL', 'error');
+                return;
+            }
+            if (!url.startsWith('http')) {
+                showToast('请输入有效的URL', 'error');
+                return;
+            }
+            // 更新当前视频数据
+            if (currentVideoData) {
+                currentVideoData.video_url = url;
+                currentVideoData.video_url_no_watermark = url;
+                // 更新按钮状态
+                downloadBtn.textContent = '⬇ 下载视频';
+                downloadBtn.disabled = false;
+                downloadBtn.title = '';
+                previewBtn.textContent = '▶ 在线预览';
+                copyLinkBtn.textContent = '🔗 复制直链';
+                // 隐藏手动输入区域
+                const manualVideoUrlEl = document.getElementById('manualVideoUrl');
+                if (manualVideoUrlEl) manualVideoUrlEl.style.display = 'none';
+                showToast('视频URL已应用，可以下载了', 'success');
+            }
+        });
+        // 支持回车键
+        manualVideoUrlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') applyVideoUrlBtn.click();
+        });
+    }
 }
 
 // ─── 剪贴板 ──────────────────────────────────────
@@ -199,11 +235,23 @@ async function handleParse() {
             currentVideoData = result.data;
             renderVideoResult(result.data);
             highlightPlatform(result.data.platform);
-            showStatus(statusBar, `✅ 解析成功 — ${PLATFORM_NAMES[result.data.platform] || result.data.platform}（${elapsed}s）`, 'success');
+
+            // 视频号无直链时显示提示
+            let statusMsg = `✅ 解析成功 — ${PLATFORM_NAMES[result.data.platform] || result.data.platform}（${elapsed}s）`;
+            let statusType = 'success';
+            if (result.data.platform === 'wechat_channels' && !result.data.video_url) {
+                statusMsg += '\n\n⚠️ 已获取视频元数据（标题、作者、封面等），但视频直链需要抓包工具获取';
+                statusType = 'warning';
+            }
+            showStatus(statusBar, statusMsg, statusType);
         } else {
             hideSkeleton();
             resultPanel.style.display = 'none';
-            showStatus(statusBar, `❌ ${result.message || '解析失败'}（${elapsed}s）`, 'error');
+            let errorMsg = result.message || '解析失败';
+            if (result.guide || result.hint) {
+                errorMsg += '\n\n' + (result.guide || result.hint);
+            }
+            showStatus(statusBar, `❌ ${errorMsg}（${elapsed}s）`, 'error');
         }
     } catch (err) {
         const elapsed = ((Date.now() - parseStartTime) / 1000).toFixed(1);
@@ -283,8 +331,29 @@ function renderVideoResult(data) {
     platformBadge.textContent = PLATFORM_NAMES[data.platform] || data.platform || '';
 
     const isVideo = data.video_url && !isImage;
-    downloadBtn.textContent = isVideo ? '⬇ 下载视频' : '⬇ 下载全部';
-    previewBtn.textContent = isVideo ? '▶ 在线预览' : '🖼 查看图片';
+    const isWechatNoUrl = data.platform === 'wechat_channels' && !isImage && !data.video_url;
+
+    // 显示/隐藏手动输入视频URL区域
+    const manualVideoUrlEl = document.getElementById('manualVideoUrl');
+    if (manualVideoUrlEl) {
+        manualVideoUrlEl.style.display = isWechatNoUrl ? 'block' : 'none';
+    }
+
+    // 根据是否有视频链接设置按钮状态
+    if (isWechatNoUrl) {
+        // 视频号但无直链：显示提示信息
+        downloadBtn.textContent = '⚠ 需要抓包获取直链';
+        downloadBtn.disabled = true;
+        downloadBtn.title = '视频号需要抓包工具获取视频直链';
+        previewBtn.textContent = '▶ 查看封面';
+        copyLinkBtn.textContent = '🔗 复制封面链接';
+    } else {
+        downloadBtn.textContent = isVideo ? '⬇ 下载视频' : '⬇ 下载全部';
+        downloadBtn.disabled = false;
+        downloadBtn.title = '';
+        previewBtn.textContent = isVideo ? '▶ 在线预览' : '🖼 查看图片';
+        copyLinkBtn.textContent = '🔗 复制直链';
+    }
 
     let galleryEl = document.getElementById('imageGallery');
     const galleryActions = $('#galleryActions');
@@ -321,6 +390,12 @@ async function handleDownload() {
 
     if (isImage && currentVideoData.image_list) {
         await handleDownloadAllImages();
+        return;
+    }
+
+    // 视频号无直链时的处理
+    if (currentVideoData?.platform === 'wechat_channels' && !currentVideoData?.video_url) {
+        showToast('视频号需要抓包工具获取视频直链，请使用 Fiddler/mitmproxy', 'warning');
         return;
     }
 
@@ -471,6 +546,20 @@ function handleCopyLink() {
         );
         return;
     }
+
+    // 视频号无直链时复制封面
+    if (currentVideoData?.platform === 'wechat_channels' && !currentVideoData?.video_url) {
+        if (currentVideoData?.cover) {
+            navigator.clipboard.writeText(currentVideoData.cover).then(
+                () => showToast('封面链接已复制', 'success'),
+                () => showToast('复制失败', 'error')
+            );
+        } else {
+            showToast('无可用链接', 'error');
+        }
+        return;
+    }
+
     if (!currentVideoData?.video_url) { showToast('无可用地址', 'error'); return; }
     const link = currentVideoData.video_url_no_watermark || currentVideoData.video_url;
     navigator.clipboard.writeText(link).then(
@@ -502,6 +591,24 @@ function handlePreview() {
         previewFallback.innerHTML = `<div style="max-height:80vh;overflow-y:auto;padding:10px">${imgs}</div>`;
         previewModal.style.display = 'flex';
         document.body.style.overflow = 'hidden';
+        return;
+    }
+
+    // 视频号无直链时显示封面
+    if (currentVideoData?.platform === 'wechat_channels' && !currentVideoData?.video_url) {
+        if (currentVideoData?.cover) {
+            previewVideo.style.display = 'none';
+            previewFallback.style.display = 'block';
+            previewFallback.innerHTML = `
+                <div style="text-align:center;padding:20px">
+                    <img src="${currentVideoData.cover}" style="max-width:100%;max-height:60vh;border-radius:8px" alt="视频封面">
+                    <p style="margin-top:16px;color:var(--text-secondary)">视频号需要抓包工具获取视频直链才能在线预览</p>
+                </div>`;
+            previewModal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        } else {
+            showToast('无可用预览', 'error');
+        }
         return;
     }
 

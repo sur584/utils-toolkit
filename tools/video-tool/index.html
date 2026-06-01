@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>视频解析下载 - 小小工具箱</title>
     <link rel="preconnect" href="http://127.0.0.1:5001">
-    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="./css/style.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
 </head>
 <body>
@@ -55,7 +55,7 @@
                     <textarea
                         id="urlInput"
                         class="url-input"
-                        placeholder="请粘贴视频链接...&#10;支持平台：抖音、B站、微博、小红书、TikTok、YouTube、Instagram、Twitter/X、西瓜视频、微信视频号&#10;&#10;直接粘贴分享文本或链接均可&#10;微信视频号：粘贴抓包获取的视频直链或 JSON 信息"
+                        placeholder="请粘贴视频链接...&#10;支持平台：抖音、B站、微博、小红书、TikTok、YouTube、Instagram、Twitter/X、西瓜视频、微信视频号&#10;&#10;直接粘贴分享文本或链接均可&#10;微信视频号：支持分享链接，或粘贴抓包获取的视频直链/JSON"
                         rows="4"
                     ></textarea>
                     <div class="input-actions">
@@ -113,6 +113,37 @@
                         <button class="btn btn-ghost btn-lg" id="previewBtn">
                             ▶ 在线预览
                         </button>
+                    </div>
+                    <!-- 视频号手动输入视频URL -->
+                    <div class="manual-video-url" id="manualVideoUrl" style="display:none">
+                        <div class="manual-url-header">
+                            <span class="manual-url-icon">🔗</span>
+                            <span>视频号需要手动输入视频直链</span>
+                        </div>
+                        <p class="manual-url-hint">使用抓包工具获取视频URL后粘贴到下方</p>
+                        <div class="manual-url-input-group">
+                            <input type="text" id="manualVideoUrlInput" class="manual-url-input" placeholder="粘贴视频直链 (mp4/m3u8 URL)">
+                            <button class="btn btn-primary btn-sm" id="applyVideoUrlBtn">应用</button>
+                        </div>
+                        <details class="manual-url-guide">
+                            <summary>如何获取视频直链？</summary>
+                            <div class="guide-content">
+                                <p><strong>方法一：浏览器插件（推荐）</strong></p>
+                                <ol>
+                                    <li>安装「猫抓」或「Stream」浏览器插件</li>
+                                    <li>在微信PC端打开视频号（使用系统浏览器）</li>
+                                    <li>播放视频，插件会自动捕获视频URL</li>
+                                    <li>复制URL粘贴到上方</li>
+                                </ol>
+                                <p><strong>方法二：抓包工具</strong></p>
+                                <ol>
+                                    <li>安装 Fiddler 或 Charles</li>
+                                    <li>配置代理抓取微信流量</li>
+                                    <li>播放视频，找到 mp4/m3u8 URL</li>
+                                    <li>复制URL粘贴到上方</li>
+                                </ol>
+                            </div>
+                        </details>
                     </div>
                     <!-- 图片选择操作栏 -->
                     <div class="gallery-actions" id="galleryActions" style="display:none">
@@ -196,6 +227,6 @@
         <p>小小工具箱 &mdash; 视频解析下载 v2.0 &mdash; 支持 10+ 主流平台</p>
     </footer>
 
-    <script src="../js/app.js"></script>
+    <script src="./js/app.js"></script>
 </body>
 </html>

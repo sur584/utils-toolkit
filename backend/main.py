@@ -9,22 +9,24 @@ import os
 # 添加 backend 目录到 sys.path 以便 import parsers
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json
+import io
 import time
 import uuid
+import hashlib
 import logging
 import asyncio
 from pathlib import Path
 from typing import List
+from collections import OrderedDict
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import yt_dlp
 
 from parsers import parse_link, batch_parse
 from parsers._utils import _is_safe_url, _extract_url
@@ -36,11 +38,77 @@ DOWNLOAD_DIR = BASE_DIR / "downloads"
 HISTORY_FILE = BASE_DIR / "history.json"
 VIDEO_TOOL_DIR = PROJECT_DIR / "tools" / "video-tool"
 IMAGE_TOOL_DIR = PROJECT_DIR / "tools" / "image-tool"
+BG_REMOVER_DIR = PROJECT_DIR / "tools" / "bg-remover"
+IMAGE_COMPOSITE_DIR = PROJECT_DIR / "tools" / "image-composite"
+MODELS_DIR = PROJECT_DIR / "models"
+LIBS_DIR = PROJECT_DIR / "tools" / "libs"
 
 DOWNLOAD_DIR.mkdir(exist_ok=True)
+MODELS_DIR.mkdir(exist_ok=True)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
+# 让 rembg 把模型存到项目内的 models 目录
+os.environ["U2NET_HOME"] = str(MODELS_DIR)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(BASE_DIR / "app.log", encoding="utf-8"),
+    ],
+)
 logger = logging.getLogger(__name__)
+
+# ─── 全局 rembg session（按模型缓存，避免每次请求重新加载）──
+_bg_sessions = {}
+BG_MODELS = {
+    "u2netp": "极速（推荐）",
+    "u2net": "标准",
+    "isnet-general-use": "通用精准（产品/物体推荐）",
+    "u2net_human_seg": "人像优化",
+    "silueta": "边缘更精细",
+}
+BG_DEFAULT_MODEL = "u2netp"
+
+def _get_bg_session(model_name: str = None):
+    model_name = model_name or BG_DEFAULT_MODEL
+    if model_name not in BG_MODELS:
+        model_name = BG_DEFAULT_MODEL
+    if model_name not in _bg_sessions:
+        import os as _os
+        _os.environ.setdefault("OMP_NUM_THREADS", str(min(_os.cpu_count() or 4, 8)))
+        from rembg import new_session
+        from onnxruntime import SessionOptions, GraphOptimizationLevel, ExecutionMode
+        nthreads = min(_os.cpu_count() or 4, 8)
+        opts = SessionOptions()
+        opts.graph_optimization_level = GraphOptimizationLevel.ORT_ENABLE_ALL
+        opts.execution_mode = ExecutionMode.ORT_PARALLEL
+        opts.inter_op_num_threads = nthreads
+        opts.intra_op_num_threads = nthreads
+        logger.info(f"加载 rembg 模型: {model_name}")
+        _bg_sessions[model_name] = new_session(model_name, opts)
+        logger.info(f"模型 {model_name} 加载完成")
+    return _bg_sessions[model_name]
+
+# ─── 结果缓存（相同图片+模型+质量 → 秒返回）──
+_bg_cache = OrderedDict()
+_BG_CACHE_MAX = 50
+
+def _cache_key(data: bytes, model: str, quality: str) -> str:
+    h = hashlib.md5(data).hexdigest()
+    return f"{h}_{model}_{quality}"
+
+def _cache_get(key: str):
+    if key in _bg_cache:
+        _bg_cache.move_to_end(key)
+        return _bg_cache[key]
+    return None
+
+def _cache_set(key: str, value: bytes):
+    _bg_cache[key] = value
+    _bg_cache.move_to_end(key)
+    while len(_bg_cache) > _BG_CACHE_MAX:
+        _bg_cache.popitem(last=False)
 
 # ─── FastAPI 应用 ─────────────────────────────────────
 app = FastAPI(title="小小工具箱", version="2.0.0")
@@ -268,6 +336,7 @@ async def download_video(
             filepath.unlink()
 
         def _download_with_ytdlp():
+            import yt_dlp
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
@@ -382,6 +451,177 @@ async def delete_history_record(record_id: str):
     return {"message": "已删除"}
 
 
+@app.get("/api/bg-remove/models")
+async def bg_remove_models():
+    """返回可用的抠图模型列表"""
+    return {"models": BG_MODELS, "default": BG_DEFAULT_MODEL}
+
+
+# ─── 抠图 API ─────────────────────────────────────────
+def _preprocess_image(data: bytes, fast: bool = False) -> "Image.Image":
+    """预处理图片：统一颜色模式、限制尺寸，返回 PIL Image（避免重复编码）"""
+    from PIL import Image, UnidentifiedImageError
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()  # 强制解码，检测损坏文件
+    except UnidentifiedImageError:
+        raise ValueError("无法识别此文件为图片。请确认文件是 JPG、PNG、WebP 或 BMP 格式，而非其他类型文件")
+    except Exception as e:
+        raise ValueError(f"图片文件损坏或无法读取，请尝试重新导出图片：{str(e)[:100]}")
+
+    orig_mode = img.mode
+    # 统一颜色模式（rembg 不支持 CMYK/P/L 等模式）
+    if img.mode not in ('RGB', 'RGBA'):
+        try:
+            img = img.convert('RGBA' if img.mode in ('P', 'LA', 'PA') else 'RGB')
+        except Exception:
+            raise ValueError(f"不支持的颜色模式 {orig_mode}，请将图片转换为 RGB 或 RGBA 模式后重试")
+
+    # 限制最大尺寸：fast 模式用更小的尺寸
+    max_dim = 2048 if fast else 4096
+    if max(img.size) > max_dim:
+        ratio = max_dim / max(img.size)
+        new_size = (int(img.width * ratio), int(img.height * ratio))
+        img = img.resize(new_size, Image.LANCZOS)
+
+    if min(img.size) < 10:
+        raise ValueError(f"图片尺寸太小（{img.width}x{img.height}），至少需要 10x10 像素")
+
+    return img
+
+
+@app.post("/api/bg-remove")
+async def bg_remove(file: UploadFile = File(...), model: str = Form(BG_DEFAULT_MODEL), quality: str = Form("fast")):
+    """单张图片抠图（移除背景）quality: fast=速度优先, high=质量优先"""
+    input_data = await file.read()
+    if len(input_data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="文件大小不能超过 20MB")
+    if len(input_data) == 0:
+        raise HTTPException(status_code=400, detail="文件为空")
+
+    fast_mode = quality != "high"
+
+    # 检查缓存
+    ck = _cache_key(input_data, model, quality)
+    cached = _cache_get(ck)
+    if cached:
+        logger.info(f"命中缓存: {file.filename}")
+        from urllib.parse import quote
+        base_name = file.filename.rsplit('.', 1)[0] if file.filename else "image"
+        filename = f"nobg_{base_name}.png"
+        ascii_name = "".join(c if ord(c) < 128 else '_' for c in filename)
+        encoded = quote(filename)
+        return StreamingResponse(
+            io.BytesIO(cached),
+            media_type="image/png",
+            headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"},
+        )
+
+    def _process():
+        from rembg import remove
+        processed = _preprocess_image(input_data, fast=fast_mode)
+        kwargs = dict(
+            session=_get_bg_session(model),
+            alpha_matting=not fast_mode,
+        )
+        if not fast_mode:
+            kwargs["alpha_matting_foreground_threshold"] = 240
+            kwargs["alpha_matting_background_threshold"] = 10
+            kwargs["alpha_matting_erode_size"] = 10
+        result = remove(processed, **kwargs)
+        # rembg 输入 PIL Image 时返回 PIL Image，需要转为 bytes
+        if hasattr(result, 'save'):
+            buf = io.BytesIO()
+            result.save(buf, format='PNG')
+            return buf.getvalue()
+        return result
+
+    try:
+        output_data = await asyncio.wait_for(asyncio.to_thread(_process), timeout=120)
+    except ValueError as e:
+        # 来自 _preprocess_image 的友好错误信息
+        raise HTTPException(status_code=400, detail=str(e))
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="抠图处理超时（超过120秒）。建议：1）切换到「速度优先」模式；2）缩小图片尺寸；3）选择 u2netp 极速模型")
+    except MemoryError:
+        raise HTTPException(status_code=500, detail="内存不足，图片太大无法处理。请将图片缩小到 2048px 以内后重试")
+    except Exception as e:
+        logger.error(f"抠图处理失败 {file.filename}: {e}", exc_info=True)
+        err_msg = str(e)
+        if "ONNX" in err_msg or "onnx" in err_msg:
+            raise HTTPException(status_code=500, detail="AI 模型加载失败，请尝试切换其他模型或重启服务")
+        if "CUDA" in err_msg or "cuda" in err_msg:
+            raise HTTPException(status_code=500, detail="GPU 加速不可用，请切换到 CPU 模型（如 u2netp）")
+        raise HTTPException(status_code=500, detail=f"抠图处理失败：{err_msg[:200]}")
+
+    # 存入缓存
+    _cache_set(ck, output_data)
+
+    from urllib.parse import quote
+    base_name = file.filename.rsplit('.', 1)[0] if file.filename else "image"
+    filename = f"nobg_{base_name}.png"
+    ascii_name = "".join(c if ord(c) < 128 else '_' for c in filename)
+    encoded = quote(filename)
+    return StreamingResponse(
+        io.BytesIO(output_data),
+        media_type="image/png",
+        headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"},
+    )
+
+
+@app.post("/api/bg-remove-batch")
+async def bg_remove_batch(files: List[UploadFile] = File(...), model: str = Form(BG_DEFAULT_MODEL), quality: str = Form("fast")):
+    """批量抠图（顺序处理，返回下载路径列表）"""
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="批量抠图最多支持 50 张图片")
+
+    fast_mode = quality != "high"
+    results = []
+    for f in files:
+        input_data = await f.read()
+        if len(input_data) > 20 * 1024 * 1024:
+            results.append({"filename": f.filename, "success": False, "error": "文件超过 20MB"})
+            continue
+
+        def _process(data=input_data):
+            from rembg import remove
+            processed = _preprocess_image(data, fast=fast_mode)
+            kwargs = dict(
+                session=_get_bg_session(model),
+                alpha_matting=not fast_mode,
+            )
+            if not fast_mode:
+                kwargs["alpha_matting_foreground_threshold"] = 240
+                kwargs["alpha_matting_background_threshold"] = 10
+                kwargs["alpha_matting_erode_size"] = 10
+            return remove(processed, **kwargs)
+
+        try:
+            output_data = await asyncio.wait_for(asyncio.to_thread(_process), timeout=120)
+            base = f.filename.rsplit('.', 1)[0] if f.filename else "image"
+            out_name = f"nobg_{base}.png"
+            out_path = BG_REMOVER_DIR / "output"
+            out_path.mkdir(exist_ok=True)
+            (out_path / out_name).write_bytes(output_data)
+            results.append({"filename": out_name, "success": True})
+        except asyncio.TimeoutError:
+            results.append({"filename": f.filename, "success": False, "error": "处理超时（超过120秒）"})
+        except Exception as e:
+            logger.error(f"批量抠图失败 {f.filename}: {e}", exc_info=True)
+            results.append({"filename": f.filename, "success": False, "error": str(e)[:200]})
+
+    return {"results": results}
+
+
+@app.get("/api/bg-remove/download/{filename}")
+async def bg_remove_download(filename: str):
+    """下载抠图结果"""
+    out_path = BG_REMOVER_DIR / "output" / filename
+    if not out_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(path=str(out_path), filename=filename, media_type="image/png")
+
+
 # ─── 根路由：跳转到 /tools/ ─────────────────────────────
 @app.get("/")
 async def root():
@@ -405,11 +645,33 @@ if VIDEO_TOOL_DIR.exists():
 if IMAGE_TOOL_DIR.exists():
     app.mount("/tools/image-tool", StaticFiles(directory=str(IMAGE_TOOL_DIR), html=True), name="image-tool")
 
+# ─── 挂载抠图工具前端 ────────────────────────────────────
+if BG_REMOVER_DIR.exists():
+    app.mount("/tools/bg-remover", StaticFiles(directory=str(BG_REMOVER_DIR), html=True), name="bg-remover")
+
+# ─── 挂载溶图工具前端 ────────────────────────────────────
+if IMAGE_COMPOSITE_DIR.exists():
+    app.mount("/tools/image-composite", StaticFiles(directory=str(IMAGE_COMPOSITE_DIR), html=True), name="image-composite")
+
+# ─── 挂载公共库 ────────────────────────────────────
+if LIBS_DIR.exists():
+    app.mount("/tools/libs", StaticFiles(directory=str(LIBS_DIR)), name="libs")
+
 
 if __name__ == "__main__":
     print("\n" + "=" * 50)
     print("  小小工具箱 v2.0")
     print("  支持：图片处理 | 视频解析下载（抖音/B站/小红书/TikTok/YouTube 等）")
-    print("  打开浏览器访问: http://127.0.0.1:5001")
+    print("  本机访问: http://127.0.0.1:5001")
+    print("  局域网:   http://0.0.0.0:5001 (同网络设备可访问)")
+
+    # 预热 rembg 默认模型，避免首次请求卡顿
+    try:
+        print(f"[...] 正在加载 AI 抠图模型 ({BG_DEFAULT_MODEL})...")
+        _get_bg_session()
+        print("[OK] AI 模型加载完成")
+    except Exception as e:
+        print(f"[WARN] 模型预加载失败（首次使用时会自动下载）: {e}")
+
     print("=" * 50 + "\n")
-    uvicorn.run("main:app", host="127.0.0.1", port=5001, log_level="info")
+    uvicorn.run("main:app", host="0.0.0.0", port=5001, log_level="info")
