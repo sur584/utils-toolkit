@@ -51,11 +51,7 @@ python launcher.py
 | 地址 | 内容 |
 |------|------|
 | `http://127.0.0.1:5001/` | 自动跳转到工具箱首页 |
-| `http://127.0.0.1:5001/tools/` | 工具箱首页 |
-| `http://127.0.0.1:5001/tools/video-tool/` | 视频解析下载 |
-| `http://127.0.0.1:5001/tools/image-tool/` | 图片批量处理 |
-| `http://127.0.0.1:5001/tools/bg-remover/` | 智能抠图 |
-| `http://127.0.0.1:5001/tools/image-composite/` | 溶图合成 |
+
 
 ## 环境要求
 
@@ -80,11 +76,7 @@ utils-toolkit/
 │   ├── main.py                # FastAPI 应用
 │   ├── decrypt.py             # 微信视频号解密
 │   └── parsers/               # 多平台视频解析器
-│       ├── __init__.py        # 统一入口
-│       ├── _utils.py          # 共用函数
-│       ├── douyin.py          # 抖音
-│       ├── bilibili.py        # B站
-│       └── ...                # 共 10 个平台
+
 ├── tools/
 │   ├── libs/                  # 公共前端库
 │   │   ├── tailwind.js
