@@ -15,13 +15,19 @@
   <script src="../libs/FileSaver.min.js"></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg-primary, #f5f7fa);color:#1d2129;overflow:hidden;height:100vh}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg-primary);color:var(--text-primary);overflow:hidden;height:100vh}
+    [data-theme="light"] body{background-image:linear-gradient(135deg,#f4f5f9 0%,#f8f7fa 50%,#f5f8fa 100%)}
+    [data-theme="dark"] body{background-image:radial-gradient(ellipse 80% 60% at 20% 10%,rgba(99,102,241,.03) 0%,transparent 50%),radial-gradient(ellipse 60% 50% at 80% 90%,rgba(100,116,139,.03) 0%,transparent 50%)}
     ::-webkit-scrollbar{width:6px;height:6px}
-    ::-webkit-scrollbar-thumb{background:#d0d5dd;border-radius:3px}
+    [data-theme="light"] ::-webkit-scrollbar-thumb{background:#d0d5dd;border-radius:3px}
+    [data-theme="dark"] ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
     ::-webkit-scrollbar-track{background:transparent}
-    input[type=range]{-webkit-appearance:none;height:4px;background:#e5e7eb;border-radius:2px;outline:none}
-    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;background:#f97316;border-radius:50%;cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.2)}
-    .checkerboard{background-image:linear-gradient(45deg,#e5e7eb 25%,transparent 25%),linear-gradient(-45deg,#e5e7eb 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e5e7eb 75%),linear-gradient(-45deg,transparent 75%,#e5e7eb 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}
+    input[type=range]{-webkit-appearance:none;height:4px;border-radius:2px;outline:none}
+    [data-theme="light"] input[type=range]{background:#e5e7eb}
+    [data-theme="dark"] input[type=range]{background:rgba(255,255,255,.1)}
+    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;background:var(--accent);border-radius:50%;cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+    [data-theme="light"] .checkerboard{background-image:linear-gradient(45deg,#e5e7eb 25%,transparent 25%),linear-gradient(-45deg,#e5e7eb 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e5e7eb 75%),linear-gradient(-45deg,transparent 75%,#e5e7eb 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}
+    [data-theme="dark"] .checkerboard{background-color:#1a1a2e;background-image:linear-gradient(45deg,#252540 25%,transparent 25%),linear-gradient(-45deg,#252540 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#252540 75%),linear-gradient(-45deg,transparent 75%,#252540 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}
     @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     .fade-in{animation:fadeIn .2s ease}
     .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:500;color:#fff;pointer-events:none;animation:toastIn .3s ease,toastOut .3s ease 2.2s forwards}

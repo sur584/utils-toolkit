@@ -1,41 +1,41 @@
 /* ─── CSS 变量（主题色） ──────────────────────── */
 :root {
-    --bg-primary: #0a0e1a;
-    --bg-secondary: #111827;
-    --bg-card: #1a1f35;
-    --bg-input: #0f1525;
-    --border: #1e293b;
-    --border-focus: #3b82f6;
-    --text-primary: #e2e8f0;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --accent-glow: rgba(59, 130, 246, 0.3);
+    --bg-primary: #111118;
+    --bg-secondary: rgba(16, 16, 26, 0.82);
+    --bg-card: rgba(22, 22, 35, 0.7);
+    --bg-input: rgba(255, 255, 255, 0.05);
+    --border: rgba(255, 255, 255, 0.06);
+    --border-focus: rgba(129, 140, 248, 0.4);
+    --text-primary: #eeeef2;
+    --text-secondary: #a8a8b8;
+    --text-muted: #6e6e82;
+    --accent: #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-glow: rgba(129, 140, 248, 0.12);
     --danger: #ef4444;
     --success: #22c55e;
     --warning: #f59e0b;
-    --gradient: linear-gradient(135deg, #3b82f6, #8b5cf6);
-    --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    --gradient: linear-gradient(135deg, #6366f1, #a78bfa);
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
     --radius: 12px;
     --radius-sm: 8px;
     --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 [data-theme="light"] {
-    --bg-primary: #f1f5f9;
-    --bg-secondary: #ffffff;
-    --bg-card: #ffffff;
-    --bg-input: #f8fafc;
-    --border: #e2e8f0;
-    --border-focus: #3b82f6;
-    --text-primary: #1e293b;
-    --text-secondary: #475569;
-    --text-muted: #94a3b8;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --accent-glow: rgba(59, 130, 246, 0.15);
-    --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+    --bg-primary: #f4f5f9;
+    --bg-secondary: rgba(255, 255, 255, 0.55);
+    --bg-card: rgba(255, 255, 255, 0.65);
+    --bg-input: rgba(255, 255, 255, 0.6);
+    --border: rgba(255, 255, 255, 0.6);
+    --border-focus: #6366f1;
+    --text-primary: #1a1d2e;
+    --text-secondary: #5a6478;
+    --text-muted: #9ca3af;
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --accent-glow: rgba(99, 102, 241, 0.08);
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
 }
 
 /* ─── 全局重置 ──────────────────────────────── */
@@ -55,14 +55,23 @@ body {
     overflow-x: hidden;
 }
 
+[data-theme="light"] body {
+    background-image: linear-gradient(135deg, #f4f5f9 0%, #f8f7fa 50%, #f5f8fa 100%);
+}
+
+[data-theme="dark"] body {
+    background-image: radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99,102,241,0.03) 0%, transparent 50%),
+                      radial-gradient(ellipse 60% 50% at 80% 90%, rgba(100,116,139,0.03) 0%, transparent 50%);
+}
+
 /* 背景网格装饰 */
 body::before {
     content: "";
     position: fixed;
     inset: 0;
     background:
-        radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.05) 0%, transparent 50%),
-        radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 50%);
+        radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.03) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.02) 0%, transparent 50%);
     pointer-events: none;
     z-index: 0;
 }
@@ -72,9 +81,16 @@ body::before {
     position: sticky;
     top: 0;
     z-index: 100;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-    backdrop-filter: blur(12px);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+[data-theme="light"] .header {
+    background: rgba(255, 255, 255, 0.6);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+}
+[data-theme="dark"] .header {
+    background: rgba(16, 16, 26, 0.75);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .header-inner {
@@ -288,11 +304,22 @@ body::before {
 
 /* ─── 卡片 ──────────────────────────────────── */
 .card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-radius: var(--radius);
     padding: 28px;
-    box-shadow: var(--shadow);
+}
+[data-theme="light"] .card {
+    background: rgba(255, 255, 255, 0.65);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+        0 2px 16px rgba(0, 0, 0, 0.05);
+}
+[data-theme="dark"] .card {
+    background: rgba(22, 22, 35, 0.7);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 2px 16px rgba(0, 0, 0, 0.2);
 }
 
 .card-header {

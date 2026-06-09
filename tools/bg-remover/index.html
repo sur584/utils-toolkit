@@ -16,13 +16,18 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html{height:100%;overflow:hidden}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg-primary, #f5f7fa);color:#1d2129;overflow:hidden;height:100%;min-height:100vh}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg-primary);color:var(--text-primary);overflow:hidden;height:100%;min-height:100vh}
+[data-theme="light"] body{background-image:linear-gradient(135deg,#f4f5f9 0%,#f8f7fa 50%,#f5f8fa 100%)}
+[data-theme="dark"] body{background-image:radial-gradient(ellipse 80% 60% at 20% 10%,rgba(99,102,241,.03) 0%,transparent 50%),radial-gradient(ellipse 60% 50% at 80% 90%,rgba(100,116,139,.03) 0%,transparent 50%)}
 #root{height:100%;overflow:hidden}
-::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#d9dce4;border-radius:3px}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}
+[data-theme="light"] ::-webkit-scrollbar-thumb{background:#d9dce4;border-radius:3px}
+[data-theme="dark"] ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes fadeOut{from{opacity:1}to{opacity:0}}
 .animate-fade-up{animation:fadeUp .35s ease-out both}
-.checkerboard{background-color:#fff;background-image:linear-gradient(45deg,#e8e8e8 25%,transparent 25%),linear-gradient(-45deg,#e8e8e8 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e8e8e8 75%),linear-gradient(-45deg,transparent 75%,#e8e8e8 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0px}
+[data-theme="light"] .checkerboard{background-color:#fff;background-image:linear-gradient(45deg,#e8e8e8 25%,transparent 25%),linear-gradient(-45deg,#e8e8e8 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e8e8e8 75%),linear-gradient(-45deg,transparent 75%,#e8e8e8 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0px}
+[data-theme="dark"] .checkerboard{background-color:#1a1a2e;background-image:linear-gradient(45deg,#252540 25%,transparent 25%),linear-gradient(-45deg,#252540 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#252540 75%),linear-gradient(-45deg,transparent 75%,#252540 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0px}
 .editing *{cursor:none!important}
 .editing button,.editing input,.editing select,.editing a{cursor:pointer!important}
 @media screen and (max-height:600px){body{overflow:auto}#root{height:auto;min-height:100vh}}

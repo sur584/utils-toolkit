@@ -20,548 +20,696 @@ body {
     color: var(--text-primary);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
 }
 a { text-decoration: none; color: inherit; }
 
-/* ─── Header ─── */
-.header {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-    height: 56px;
+/* ─── Layout ─── */
+.layout { display: flex; min-height: 100vh; }
+
+/* ─── Sidebar ─── */
+.sidebar {
+    width: 240px; flex-shrink: 0;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    display: flex; flex-direction: column;
+    position: sticky; top: 0; height: 100vh;
+    overflow-y: auto; z-index: 50;
 }
-.header-inner {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 24px;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+.sidebar-logo {
+    display: flex; align-items: center;
+    gap: 10px; padding: 22px 18px 18px;
 }
-.logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.logo-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
+.sidebar-logo .logo-icon {
+    width: 34px; height: 34px; border-radius: 10px;
     background: linear-gradient(135deg, #6366f1, #a78bfa);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-size: 15px;
-    font-weight: 700;
-    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 16px; font-weight: 700; flex-shrink: 0;
 }
-.logo h1 {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--text-primary);
-    white-space: nowrap;
+.sidebar-logo h1 { font-size: 18px; font-weight: 700; white-space: nowrap; }
+.sidebar-nav { flex: 1; padding: 14px 10px; }
+.sidebar-nav .nav-label {
+    font-size: 14px; color: var(--text-muted);
+    padding: 10px 12px 8px; text-transform: uppercase; letter-spacing: 0.5px;
 }
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-radius: 10px;
+    font-size: 16px; color: var(--text-secondary);
+    cursor: pointer; transition: all 0.2s;
+    border: none; background: none; width: 100%;
+    text-align: left; font-family: inherit;
 }
+.nav-item:hover { color: var(--text-primary); }
+.nav-item.active { font-weight: 600; }
+.nav-item .nav-icon { font-size: 19px; width: 22px; text-align: center; }
+.sidebar-bottom { padding: 14px 10px; }
 .theme-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 16px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-radius: 10px;
+    font-size: 16px; color: var(--text-secondary);
+    cursor: pointer; border: none; background: none;
+    width: 100%; font-family: inherit; transition: all 0.2s;
 }
-.theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+.theme-btn:hover { color: var(--text-primary); }
+.theme-btn .nav-icon { font-size: 19px; width: 22px; text-align: center; }
 
-/* ─── Hero ─── */
-.hero {
-    position: relative;
-    text-align: center;
-    padding: 64px 24px 48px;
-    overflow: hidden;
+/* ─── Main Content ─── */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.main-header {
+    position: sticky; top: 0; z-index: 40;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    padding: 18px 28px;
+    display: flex; align-items: center; gap: 16px;
 }
-.hero::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(99,102,241,0.1) 0%, transparent 70%);
-    pointer-events: none;
-}
-.hero h2 {
-    font-size: 34px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    margin-bottom: 12px;
-    position: relative;
-}
-.hero h2 em {
-    font-style: normal;
-    background: linear-gradient(135deg, #6366f1, #a78bfa, #ec4899);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-.hero p {
-    font-size: 15px;
-    color: var(--text-secondary);
-    margin-bottom: 32px;
-    position: relative;
-}
-.hero-search {
-    position: relative;
-    max-width: 500px;
-    margin: 0 auto;
-}
-.hero-search input {
-    width: 100%;
-    height: 48px;
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
+.search-box { flex: 1; position: relative; max-width: 480px; }
+.search-box input {
+    width: 100%; height: 46px; border-radius: 12px;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     color: var(--text-primary);
-    padding: 0 18px 0 46px;
-    font-size: 14px;
-    outline: none;
-    transition: all 0.25s;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    padding: 0 18px 0 42px; font-size: 16px;
+    outline: none; transition: all 0.25s;
 }
-.hero-search input::placeholder { color: var(--text-muted); }
-.hero-search input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-glow), 0 2px 12px rgba(0,0,0,0.06);
+.search-box input::placeholder { color: var(--text-muted); }
+.search-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.search-box .s-icon {
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    color: var(--text-muted); font-size: 16px; pointer-events: none;
 }
-.hero-search .s-icon {
-    position: absolute;
-    left: 16px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-muted);
-    font-size: 16px;
-    pointer-events: none;
+.filter-row { display: flex; gap: 6px; }
+.filter-btn {
+    padding: 7px 18px; border-radius: 8px;
+    font-size: 15px; font-weight: 500;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    color: var(--text-secondary); cursor: pointer;
+    transition: all 0.2s; white-space: nowrap;
+}
+.filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+.filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.main-body { flex: 1; padding: 28px 28px 40px; overflow-y: auto; }
+.tools-head {
+    display: flex; align-items: center;
+    justify-content: space-between; margin-bottom: 18px;
+}
+.tools-head h3 { font-size: 19px; font-weight: 700; }
+.tools-head .count {
+    font-size: 15px; color: var(--text-muted);
+    backdrop-filter: blur(8px); padding: 5px 14px; border-radius: 8px;
 }
 
-/* ─── Tools Section ─── */
-.tools-wrap {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 24px 48px;
-}
-.tools-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-}
-.tools-head h3 {
-    font-size: 17px;
-    font-weight: 700;
-}
-.tools-head .count {
-    font-size: 13px;
-    color: var(--text-secondary);
-    background: var(--bg-card);
-    padding: 4px 12px;
-    border-radius: 8px;
-}
-.tool-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 16px;
-}
+/* ─── Tool Grid ─── */
+.tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 
 /* ─── Tool Card ─── */
 .tool-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border-radius: 12px; padding: 22px;
+    display: flex; flex-direction: column;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    overflow: hidden;
-    cursor: pointer;
+    cursor: pointer; position: relative;
 }
-.tool-card::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 3px;
-    opacity: 0;
-    transition: opacity 0.25s;
-}
-.tool-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 32px rgba(0,0,0,0.18);
-    border-color: transparent;
-}
-.tool-card:hover::after { opacity: 1; }
-.tool-card[data-color="blue"]::after { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
-.tool-card[data-color="green"]::after { background: linear-gradient(90deg, #10b981, #34d399); }
-.tool-card[data-color="purple"]::after { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
-.tool-card[data-color="orange"]::after { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
-.tool-card[data-color="pink"]::after { background: linear-gradient(90deg, #ec4899, #f472b6); }
-.tool-card[data-color="blue"]:hover { border-color: rgba(59,130,246,0.25); }
-.tool-card[data-color="green"]:hover { border-color: rgba(16,185,129,0.25); }
-.tool-card[data-color="purple"]:hover { border-color: rgba(139,92,246,0.25); }
-.tool-card[data-color="orange"]:hover { border-color: rgba(245,158,11,0.25); }
-.tool-card[data-color="pink"]:hover { border-color: rgba(236,72,153,0.25); }
-
-.card-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    margin-bottom: 12px;
-}
+.tool-card:hover { transform: translateY(-3px); }
+.card-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 12px; }
 .card-icon {
-    width: 46px; height: 46px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-    flex-shrink: 0;
-    transition: transform 0.25s;
+    width: 44px; height: 44px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; flex-shrink: 0; transition: transform 0.25s;
 }
 .tool-card:hover .card-icon { transform: scale(1.06); }
-.card-meta h4 {
-    font-size: 16px;
-    font-weight: 700;
-    line-height: 1.3;
-    margin-bottom: 3px;
-}
-.card-meta .badge {
-    font-size: 11px;
-    color: var(--text-muted);
-}
+.card-meta h4 { font-size: 17px; font-weight: 700; line-height: 1.3; margin-bottom: 4px; }
+.card-meta .badge { font-size: 13px; color: var(--text-muted); }
 .card-body {
-    font-size: 13px;
-    color: var(--text-secondary);
-    line-height: 1.6;
-    flex: 1;
-    margin-bottom: 14px;
+    font-size: 15px; color: var(--text-secondary);
+    line-height: 1.6; flex: 1; margin-bottom: 14px;
 }
-.card-foot {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-.tag {
-    font-size: 11px;
-    padding: 3px 10px;
-    border-radius: 6px;
-    font-weight: 500;
-}
+.card-foot { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { font-size: 13px; padding: 3px 10px; border-radius: 6px; font-weight: 500; }
 .tag-blue { background: rgba(59,130,246,0.1); color: #60a5fa; }
 .tag-green { background: rgba(16,185,129,0.1); color: #34d399; }
 .tag-purple { background: rgba(139,92,246,0.1); color: #a78bfa; }
 .tag-orange { background: rgba(245,158,11,0.1); color: #fbbf24; }
 .tag-pink { background: rgba(236,72,153,0.1); color: #f472b6; }
-
 .tool-card.hidden { display: none; }
 
-/* ─── Filter Row ─── */
-.filter-row {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
-    margin-bottom: 24px;
-    flex-wrap: wrap;
-}
-.filter-btn {
-    padding: 6px 16px;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: 500;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.filter-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-.filter-btn.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-}
-
-/* ─── Changelog ─── */
-.changelog {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 24px 32px;
-}
-.changelog h3 {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 12px;
-    color: var(--text-secondary);
-}
-.changelog-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-}
-.changelog-date {
-    color: var(--text-muted);
-    white-space: nowrap;
-}
-.changelog-text {
-    color: var(--text-secondary);
-}
-
 /* ─── Empty State ─── */
-.empty {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--text-secondary);
-    display: none;
-}
+.empty { text-align: center; padding: 48px 16px; color: var(--text-secondary); display: none; }
 .empty.show { display: block; }
-.empty-icon { font-size: 48px; margin-bottom: 10px; opacity: 0.4; }
+.empty-icon { font-size: 42px; margin-bottom: 8px; opacity: 0.4; }
+.empty p { font-size: 15px; }
 
-/* ─── Quick Links ─── */
-.quick {
-    max-width: 1200px;
-    margin: 0 auto 32px;
-    padding: 0 24px;
+/* ─── Right Panel ─── */
+.right-panel {
+    width: 280px; flex-shrink: 0;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    padding: 24px 18px; overflow-y: auto;
+    position: sticky; top: 0; height: 100vh;
 }
-.quick-label {
-    font-size: 13px;
-    color: var(--text-muted);
-    margin-bottom: 10px;
+.panel-section { margin-bottom: 26px; }
+.panel-title {
+    font-size: 16px; font-weight: 600; color: var(--text-primary);
+    margin-bottom: 14px; display: flex; align-items: center; gap: 7px;
 }
-.quick-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+.panel-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+/* ─── Timeline ─── */
+.timeline { display: flex; flex-direction: column; gap: 0; }
+.tl-item {
+    display: flex; gap: 12px;
+    padding: 10px 0 10px 2px;
+    position: relative;
 }
-.quick a {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border-radius: 10px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    font-size: 12px;
-    transition: all 0.2s;
+.tl-item:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 5px; top: 28px; bottom: -2px;
+    width: 1px;
 }
-.quick a:hover { border-color: var(--accent); color: var(--accent); }
+[data-theme="light"] .tl-item:not(:last-child)::before { background: rgba(0,0,0,0.08); }
+[data-theme="dark"] .tl-item:not(:last-child)::before { background: rgba(255,255,255,0.06); }
+.tl-marker {
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-top: 5px;
+    position: relative;
+    z-index: 1;
+}
+.tl-item:first-child .tl-marker {
+    width: 11px; height: 11px;
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.tl-item:not(:first-child) .tl-marker {
+    width: 8px; height: 8px;
+    background: var(--text-muted);
+    margin-top: 6px;
+    margin-left: 1.5px;
+}
+.tl-content { flex: 1; min-width: 0; }
+.tl-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 3px;
+}
+.tl-date { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tl-tag {
+    font-size: 10px; padding: 1px 7px;
+    border-radius: 4px; font-weight: 600;
+    letter-spacing: 0.3px;
+}
+.tl-tag-blue { background: rgba(59,130,246,0.12); color: #60a5fa; }
+.tl-tag-green { background: rgba(16,185,129,0.12); color: #34d399; }
+.tl-tag-purple { background: rgba(139,92,246,0.12); color: #a78bfa; }
+[data-theme="dark"] .tl-tag-blue { background: rgba(59,130,246,0.18); color: #93bbfc; }
+[data-theme="dark"] .tl-tag-green { background: rgba(16,185,129,0.18); color: #6ee7b7; }
+[data-theme="dark"] .tl-tag-purple { background: rgba(139,92,246,0.18); color: #c4b5fd; }
+.tl-text { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+.quick-list { display: flex; flex-direction: column; gap: 6px; }
+.quick-list a {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-radius: 8px;
+    font-size: 15px; color: var(--text-secondary); transition: all 0.2s;
+}
+.quick-list a:hover { color: var(--accent); }
+.quick-list a .q-icon { font-size: 17px; width: 22px; text-align: center; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat-item {
+    text-align: center; padding: 16px 10px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-radius: 12px;
+}
+.stat-num { font-size: 24px; font-weight: 700; color: var(--accent); line-height: 1; }
+.stat-label { font-size: 13px; color: var(--text-muted); margin-top: 5px; }
 
 /* ─── Footer ─── */
-.footer {
-    text-align: center;
-    padding: 24px;
-    color: var(--text-muted);
-    font-size: 12px;
-    border-top: 1px solid var(--border);
+.right-footer {
+    margin-top: auto; padding-top: 16px;
+    font-size: 13px; color: var(--text-muted);
+    text-align: center; line-height: 1.6;
+}
+
+/* ─── Mobile ─── */
+.sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 49; }
+.mobile-header {
+    display: none; position: sticky; top: 0; z-index: 40;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    padding: 14px 16px; align-items: center; gap: 12px;
+}
+.mobile-menu-btn {
+    width: 40px; height: 40px; border-radius: 10px;
+    backdrop-filter: blur(8px);
+    color: var(--text-primary); font-size: 20px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+
+/* ══════════════════════════════════════════
+   Light Mode
+   ══════════════════════════════════════════ */
+[data-theme="light"] body {
+    background-image: linear-gradient(135deg, #f4f5f9 0%, #f8f7fa 50%, #f5f8fa 100%);
+}
+[data-theme="light"] .sidebar {
+    background: rgba(255, 255, 255, 0.55);
+    border-right: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 1px 0 24px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .sidebar-logo { border-bottom: 1px solid rgba(0,0,0,0.06); }
+[data-theme="light"] .nav-item:hover {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+}
+[data-theme="light"] .nav-item.active {
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--accent);
+}
+[data-theme="light"] .sidebar-bottom { border-top: 1px solid rgba(0,0,0,0.06); }
+[data-theme="light"] .theme-btn:hover { background: rgba(255,255,255,0.5); }
+[data-theme="light"] .main-header {
+    background: rgba(255, 255, 255, 0.6);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+}
+[data-theme="light"] .search-box input {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+}
+[data-theme="light"] .filter-btn {
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+}
+[data-theme="light"] .tools-head .count { background: rgba(255,255,255,0.5); }
+[data-theme="light"] .tool-card {
+    background: rgba(255, 255, 255, 0.65);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+        0 2px 16px rgba(0, 0, 0, 0.05);
+}
+[data-theme="light"] .tool-card:hover {
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+        0 8px 28px rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .right-panel {
+    background: rgba(255, 255, 255, 0.5);
+    border-left: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: -1px 0 24px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .changelog-item { border-bottom: 1px solid rgba(0,0,0,0.06); }
+[data-theme="light"] .quick-list a:hover {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+}
+[data-theme="light"] .stat-item {
+    background: rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+[data-theme="light"] .right-footer { border-top: 1px solid rgba(0,0,0,0.06); }
+[data-theme="light"] .mobile-header {
+    background: rgba(255, 255, 255, 0.65);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+}
+[data-theme="light"] .mobile-menu-btn {
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+/* ══════════════════════════════════════════
+   Dark Mode
+   ══════════════════════════════════════════ */
+[data-theme="dark"] {
+    --text-primary: #eeeef2;
+    --text-secondary: #a8a8b8;
+    --text-muted: #6e6e82;
+    --accent: #818cf8;
+    --accent-glow: rgba(129, 140, 248, 0.12);
+}
+[data-theme="dark"] body {
+    background: #111118;
+    color: var(--text-primary);
+    background-image: radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99,102,241,0.03) 0%, transparent 50%),
+                      radial-gradient(ellipse 60% 50% at 80% 90%, rgba(100,116,139,0.03) 0%, transparent 50%);
+}
+[data-theme="dark"] .sidebar {
+    background: rgba(16, 16, 26, 0.82);
+    border-right: 1px solid rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .sidebar-logo { border-bottom: 1px solid rgba(255,255,255,0.04); }
+[data-theme="dark"] .sidebar-logo h1 { color: #eeeef2; }
+[data-theme="dark"] .sidebar-nav .nav-label { color: #6e6e82; }
+[data-theme="dark"] .nav-item { color: #a8a8b8; }
+[data-theme="dark"] .nav-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #eeeef2;
+}
+[data-theme="dark"] .nav-item.active {
+    background: rgba(99, 102, 241, 0.12);
+    color: #a5b4fc;
+}
+[data-theme="dark"] .sidebar-bottom { border-top: 1px solid rgba(255,255,255,0.04); }
+[data-theme="dark"] .theme-btn { color: #a8a8b8; }
+[data-theme="dark"] .theme-btn:hover { background: rgba(255,255,255,0.05); color: #eeeef2; }
+[data-theme="dark"] .main-header {
+    background: rgba(16, 16, 26, 0.75);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .search-box input {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #eeeef2;
+}
+[data-theme="dark"] .search-box input::placeholder { color: #6e6e82; }
+[data-theme="dark"] .search-box input:focus {
+    border-color: rgba(129, 140, 248, 0.4);
+    box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1);
+}
+[data-theme="dark"] .search-box .s-icon { color: #6e6e82; }
+[data-theme="dark"] .filter-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #a8a8b8;
+}
+[data-theme="dark"] .filter-btn:hover {
+    border-color: rgba(129, 140, 248, 0.3);
+    color: #a5b4fc;
+}
+[data-theme="dark"] .tools-head h3 { color: #eeeef2; }
+[data-theme="dark"] .tools-head .count {
+    background: rgba(255,255,255,0.05);
+    color: #6e6e82;
+}
+[data-theme="dark"] .tool-card {
+    background: rgba(22, 22, 35, 0.7);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 2px 16px rgba(0, 0, 0, 0.2);
+}
+[data-theme="dark"] .tool-card:hover {
+    background: rgba(26, 26, 42, 0.8);
+    box-shadow:
+        inset 0 0 0 1px rgba(129, 140, 248, 0.15),
+        0 6px 24px rgba(0, 0, 0, 0.3);
+}
+[data-theme="dark"] .card-meta h4 { color: #eeeef2; }
+[data-theme="dark"] .card-meta .badge { color: #6e6e82; }
+[data-theme="dark"] .card-body { color: #a8a8b8; }
+[data-theme="dark"] .tag-blue { background: rgba(59,130,246,0.15); color: #93bbfc; }
+[data-theme="dark"] .tag-green { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+[data-theme="dark"] .tag-purple { background: rgba(139,92,246,0.15); color: #c4b5fd; }
+[data-theme="dark"] .tag-orange { background: rgba(245,158,11,0.15); color: #fcd34d; }
+[data-theme="dark"] .tag-pink { background: rgba(236,72,153,0.15); color: #f9a8d4; }
+[data-theme="dark"] .right-panel {
+    background: rgba(16, 16, 26, 0.78);
+    border-left: 1px solid rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .panel-title { color: #eeeef2; }
+[data-theme="dark"] .changelog-item { border-bottom: 1px solid rgba(255,255,255,0.04); }
+[data-theme="dark"] .changelog-date { color: #6e6e82; }
+[data-theme="dark"] .changelog-text { color: #a8a8b8; }
+[data-theme="dark"] .quick-list a { color: #a8a8b8; }
+[data-theme="dark"] .quick-list a:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #a5b4fc;
+}
+[data-theme="dark"] .stat-item {
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .stat-label { color: #6e6e82; }
+[data-theme="dark"] .right-footer { border-top: 1px solid rgba(255,255,255,0.04); color: #6e6e82; }
+[data-theme="dark"] .empty { color: #a8a8b8; }
+[data-theme="dark"] .mobile-header {
+    background: rgba(16, 16, 26, 0.8);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .mobile-menu-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #eeeef2;
 }
 
 /* ─── Responsive ─── */
+@media (max-width: 1200px) {
+    .tool-grid { grid-template-columns: repeat(2, 1fr); }
+    .right-panel { width: 240px; }
+}
+@media (max-width: 1024px) {
+    .right-panel { display: none; }
+}
 @media (max-width: 768px) {
-    .hero { padding: 40px 16px 32px; }
-    .hero h2 { font-size: 24px; }
+    .sidebar {
+        position: fixed; left: -260px; top: 0;
+        height: 100vh; transition: left 0.3s; z-index: 50; width: 260px;
+    }
+    .sidebar.open { left: 0; }
+    .sidebar-overlay.show { display: block; }
+    .mobile-header { display: flex; }
+    .main-header { display: none; }
+    .main-body { padding: 16px; }
     .tool-grid { grid-template-columns: 1fr; }
-    .tools-wrap, .quick { padding: 0 16px; }
 }
 </style>
 </head>
 <body>
 
-<header class="header">
-    <div class="header-inner">
-        <a class="logo" href="/">
+<!-- Mobile Header -->
+<div class="mobile-header">
+    <button class="mobile-menu-btn" id="menuBtn">☰</button>
+    <div style="flex:1">
+        <span style="font-size:16px;font-weight:700">小小工具箱</span>
+    </div>
+    <button class="filter-btn active" data-filter="all" style="font-size:13px;padding:5px 12px">全部</button>
+    <button class="filter-btn" data-filter="video" style="font-size:13px;padding:5px 12px">视频</button>
+    <button class="filter-btn" data-filter="image" style="font-size:13px;padding:5px 12px">图片</button>
+</div>
+
+<div class="sidebar-overlay" id="overlay"></div>
+
+<div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
             <div class="logo-icon">⚡</div>
             <h1>小小工具箱</h1>
-        </a>
-        <div class="header-right">
-            <button class="theme-btn" id="themeBtn" title="切换主题">☀</button>
         </div>
-    </div>
-</header>
+        <nav class="sidebar-nav">
+            <div class="nav-label">工具分类</div>
+            <button class="nav-item active" data-filter="all">
+                <span class="nav-icon">🧰</span>
+                全部工具
+            </button>
+            <button class="nav-item" data-filter="video">
+                <span class="nav-icon">🎬</span>
+                视频工具
+            </button>
+            <button class="nav-item" data-filter="image">
+                <span class="nav-icon">🖼️</span>
+                图片工具
+            </button>
+            <div class="nav-label" style="margin-top:12px">快捷入口</div>
+            <a class="nav-item" href="video-tool/">
+                <span class="nav-icon">⬇️</span>
+                视频解析下载
+            </a>
+            <a class="nav-item" href="image-tool/">
+                <span class="nav-icon">🖼️</span>
+                图片批量处理
+            </a>
+            <a class="nav-item" href="bg-remover/">
+                <span class="nav-icon">✂️</span>
+                智能抠图
+            </a>
+            <a class="nav-item" href="image-composite/">
+                <span class="nav-icon">🎨</span>
+                溶图合成
+            </a>
+            <a class="nav-item" href="text-remover/">
+                <span class="nav-icon">T</span>
+                智能去文字
+            </a>
+        </nav>
+        <div class="sidebar-bottom">
+            <button class="theme-btn" id="themeBtn">
+                <span class="nav-icon">☀</span>
+                切换主题
+            </button>
+        </div>
+    </aside>
 
-<section class="hero">
-    <h2>你的 <em>万能工具箱</em></h2>
-    <p>视频解析、图片处理、格式转换……日常工作所需的一站式工具集合</p>
-    <div class="hero-search">
-        <span class="s-icon">🔍</span>
-        <input type="text" id="searchInput" placeholder="搜索工具名称或关键词..." autocomplete="off">
-    </div>
-</section>
+    <!-- Main Content -->
+    <main class="main">
+        <div class="main-header">
+            <div class="search-box">
+                <span class="s-icon">🔍</span>
+                <input type="text" id="searchInput" placeholder="搜索工具名称或关键词..." autocomplete="off">
+            </div>
+            <div class="filter-row">
+                <button class="filter-btn active" data-filter="all">全部</button>
+                <button class="filter-btn" data-filter="video">视频</button>
+                <button class="filter-btn" data-filter="image">图片</button>
+            </div>
+        </div>
+        <div class="main-body">
+            <div class="tools-head">
+                <h3>🧰 全部工具</h3>
+                <span class="count" id="countLabel">5 个工具</span>
+            </div>
+            <div class="tool-grid" id="toolGrid">
+                <a class="tool-card" href="video-tool/" data-color="blue" data-category="video" data-kw="视频 解析 下载 抖音 bilibili 小红书 tiktok youtube 快手 微博 西瓜 视频号 剪映">
+                    <div class="card-head">
+                        <div class="card-icon" style="background:rgba(59,130,246,0.12)">🎬</div>
+                        <div class="card-meta">
+                            <h4>视频解析下载</h4>
+                            <span class="badge">支持 10+ 平台</span>
+                        </div>
+                    </div>
+                    <div class="card-body">粘贴分享文本自动提取链接并解析视频信息，支持抖音、B站、小红书、TikTok、YouTube 等平台。</div>
+                    <div class="card-foot">
+                        <span class="tag tag-blue">抖音</span>
+                        <span class="tag tag-blue">B站</span>
+                        <span class="tag tag-blue">小红书</span>
+                        <span class="tag tag-blue">TikTok</span>
+                    </div>
+                </a>
+                <a class="tool-card" href="image-tool/" data-color="green" data-category="image" data-kw="图片 压缩 裁剪 批量处理 JPG PNG WebP 社媒预设 裁切 批量 格式转换">
+                    <div class="card-head">
+                        <div class="card-icon" style="background:rgba(16,185,129,0.12)">🖼️</div>
+                        <div class="card-meta">
+                            <h4>图片批量处理</h4>
+                            <span class="badge">浏览器端处理</span>
+                        </div>
+                    </div>
+                    <div class="card-body">图片压缩、裁剪、批量处理。支持 JPG/PNG/WebP，可设定目标文件大小，多种裁剪模式。</div>
+                    <div class="card-foot">
+                        <span class="tag tag-green">压缩</span>
+                        <span class="tag tag-green">裁剪</span>
+                        <span class="tag tag-green">批量</span>
+                    </div>
+                </a>
+                <a class="tool-card" href="bg-remover/" data-color="purple" data-category="image" data-kw="抠图 去背景 去除背景 透明 PNG 抠像 背景移除 AI 抠图工具">
+                    <div class="card-head">
+                        <div class="card-icon" style="background:rgba(139,92,246,0.12)">✂️</div>
+                        <div class="card-meta">
+                            <h4>智能抠图</h4>
+                            <span class="badge">AI 去背景</span>
+                        </div>
+                    </div>
+                    <div class="card-body">一键去除图片背景，支持批量处理。基于深度学习模型，自动识别主体并生成透明背景 PNG。</div>
+                    <div class="card-foot">
+                        <span class="tag tag-purple">AI 抠图</span>
+                        <span class="tag tag-purple">批量处理</span>
+                    </div>
+                </a>
+                <a class="tool-card" href="image-composite/" data-color="orange" data-category="image" data-kw="溶图 合成 图片合成 产品图 电商 背景图 模板 批量合成">
+                    <div class="card-head">
+                        <div class="card-icon" style="background:rgba(249,115,22,0.12)">🎨</div>
+                        <div class="card-meta">
+                            <h4>溶图合成</h4>
+                            <span class="badge">拖拽布局</span>
+                        </div>
+                    </div>
+                    <div class="card-body">上传底图和多张透明产品主图，拖拽调整位置，批量套用模板，一键导出合成图片。</div>
+                    <div class="card-foot">
+                        <span class="tag tag-orange">底图合成</span>
+                        <span class="tag tag-orange">模板布局</span>
+                    </div>
+                </a>
+                <a class="tool-card" href="text-remover/" data-color="pink" data-category="image" data-kw="去文字 文字去除 OCR 水印 文字移除 图片文字 文字消除 去水印 智能去文字">
+                    <div class="card-head">
+                        <div class="card-icon" style="background:rgba(236,72,153,0.12)">T</div>
+                        <div class="card-meta">
+                            <h4>智能去文字</h4>
+                            <span class="badge">AI 文字去除</span>
+                        </div>
+                    </div>
+                    <div class="card-body">自动识别图片中的文字并智能去除，基于 OCR + 图像修复技术，还原干净背景。</div>
+                    <div class="card-foot">
+                        <span class="tag tag-pink">文字检测</span>
+                        <span class="tag tag-pink">智能修复</span>
+                    </div>
+                </a>
+            </div>
+            <div class="empty" id="emptyState">
+                <div class="empty-icon">🔍</div>
+                <p>未找到匹配的工具，换个关键词试试</p>
+            </div>
+        </div>
+    </main>
 
-<section class="changelog">
-    <h3>📢 最近更新</h3>
-
-    <div class="changelog-item">
-        <span class="changelog-date">2026-06-05</span>
-        <span class="changelog-text">项目重构与性能的优化</span>
-    </div>
-     <div class="changelog-item">
-        <span class="changelog-date">2026-05-30</span>
-        <span class="changelog-text">V2.0 发布：AI 智能抠图、溶图合成工具</span>
-    </div>
-    <div class="changelog-item">
-        <span class="changelog-date">2026-05-28</span>
-        <span class="changelog-text">新增视频链接下载</span>
-    </div>
-   
-</section>
-
-<section class="tools-wrap">
-    <div class="tools-head">
-        <h3>🧰 全部工具</h3>
-        <span class="count" id="countLabel">5 个工具</span>
-    </div>
-    <div class="filter-row">
-        <button class="filter-btn active" data-filter="all">全部</button>
-        <button class="filter-btn" data-filter="video">视频工具</button>
-        <button class="filter-btn" data-filter="image">图片工具</button>
-    </div>
-    <div class="tool-grid" id="toolGrid">
-        <a class="tool-card" href="video-tool/" data-color="blue" data-category="video" data-kw="视频 解析 下载 抖音 bilibili 小红书 tiktok youtube 快手 微博 西瓜 视频号 剪映">
-            <div class="card-head">
-                <div class="card-icon" style="background:rgba(59,130,246,0.12)">🎬</div>
-                <div class="card-meta">
-                    <h4>视频解析下载</h4>
-                    <span class="badge">支持 10+ 平台</span>
+    <!-- Right Panel -->
+    <aside class="right-panel">
+        <div class="panel-section">
+            <div class="panel-title"><span class="dot"></span> 最近更新</div>
+            <div class="timeline">
+                <div class="tl-item">
+                    <div class="tl-marker"></div>
+                    <div class="tl-content">
+                        <div class="tl-head">
+                            <span class="tl-date">06-05</span>
+                            <span class="tl-tag tl-tag-purple">优化</span>
+                        </div>
+                        <div class="tl-text">项目重构与性能优化</div>
+                    </div>
+                </div>
+                <div class="tl-item">
+                    <div class="tl-marker"></div>
+                    <div class="tl-content">
+                        <div class="tl-head">
+                            <span class="tl-date">05-30</span>
+                            <span class="tl-tag tl-tag-blue">V2.0</span>
+                        </div>
+                        <div class="tl-text">AI 智能抠图、溶图合成上线</div>
+                    </div>
+                </div>
+                <div class="tl-item">
+                    <div class="tl-marker"></div>
+                    <div class="tl-content">
+                        <div class="tl-head">
+                            <span class="tl-date">05-28</span>
+                            <span class="tl-tag tl-tag-green">新增</span>
+                        </div>
+                        <div class="tl-text">视频链接解析下载</div>
+                    </div>
                 </div>
             </div>
-            <div class="card-body">粘贴分享文本自动提取链接并解析视频信息，支持抖音、B站、小红书、TikTok、YouTube 等平台，可下载视频、复制直链、在线预览。</div>
-            <div class="card-foot">
-                <span class="tag tag-blue">抖音</span>
-                <span class="tag tag-blue">B站</span>
-                <span class="tag tag-blue">小红书</span>
-                <span class="tag tag-blue">TikTok</span>
-                <span class="tag tag-blue">YouTube</span>
-            </div>
-        </a>
-        <a class="tool-card" href="image-tool/" data-color="green" data-category="image" data-kw="图片 压缩 裁剪 批量处理 JPG PNG WebP 社媒预设 裁切 批量 格式转换">
-            <div class="card-head">
-                <div class="card-icon" style="background:rgba(16,185,129,0.12)">🖼️</div>
-                <div class="card-meta">
-                    <h4>图片批量处理</h4>
-                    <span class="badge">浏览器端处理</span>
-                </div>
-            </div>
-            <div class="card-body">图片压缩、裁剪、批量处理。支持 JPG/PNG/WebP，可设定目标文件大小，多种裁剪模式，内置社交媒体尺寸预设。</div>
-            <div class="card-foot">
-                <span class="tag tag-green">压缩</span>
-                <span class="tag tag-green">裁剪</span>
-                <span class="tag tag-green">批量</span>
-                <span class="tag tag-green">社媒预设</span>
-            </div>
-        </a>
-        <a class="tool-card" href="bg-remover/" data-color="purple" data-category="image" data-kw="抠图 去背景 去除背景 透明 PNG 抠像 背景移除 AI 抠图工具">
-            <div class="card-head">
-                <div class="card-icon" style="background:rgba(139,92,246,0.12)">✂️</div>
-                <div class="card-meta">
-                    <h4>智能抠图</h4>
-                    <span class="badge">AI 去背景</span>
-                </div>
-            </div>
-            <div class="card-body">一键去除图片背景，支持批量处理。基于深度学习模型，自动识别主体并生成透明背景 PNG，支持预览和下载。</div>
-            <div class="card-foot">
-                <span class="tag tag-purple">AI 抠图</span>
-                <span class="tag tag-purple">批量处理</span>
-                <span class="tag tag-purple">透明背景</span>
-            </div>
-        </a>
-        <a class="tool-card" href="image-composite/" data-color="orange" data-category="image" data-kw="溶图 合成 图片合成 产品图 电商 背景图 模板 批量合成">
-            <div class="card-head">
-                <div class="card-icon" style="background:rgba(249,115,22,0.12)">🎨</div>
-                <div class="card-meta">
-                    <h4>溶图合成</h4>
-                    <span class="badge">拖拽布局</span>
-                </div>
-            </div>
-            <div class="card-body">上传底图和多张透明产品主图，拖拽调整位置，批量套用模板，一键导出合成图片。</div>
-            <div class="card-foot">
-                <span class="tag tag-orange">底图合成</span>
-                <span class="tag tag-orange">模板布局</span>
-                <span class="tag tag-orange">批量导出</span>
-            </div>
-        </a>
-        <a class="tool-card" href="text-remover/" data-color="pink" data-category="image" data-kw="去文字 文字去除 OCR 水印 文字移除 图片文字 文字消除 去水印 智能去文字">
-            <div class="card-head">
-                <div class="card-icon" style="background:rgba(236,72,153,0.12)">T</div>
-                <div class="card-meta">
-                    <h4>智能去文字</h4>
-                    <span class="badge">AI 文字去除</span>
-                </div>
-            </div>
-            <div class="card-body">自动识别图片中的文字并智能去除，基于 OCR + 图像修复技术，还原干净背景。</div>
-            <div class="card-foot">
-                <span class="tag tag-pink">文字检测</span>
-                <span class="tag tag-pink">智能修复</span>
-                <span class="tag tag-pink">批量处理</span>
-            </div>
-        </a>
-    </div>
-    <div class="empty" id="emptyState">
-        <div class="empty-icon">🔍</div>
-        <p>未找到匹配的工具，换个关键词试试</p>
-    </div>
-</section>
-
-<section class="quick">
-    <div class="quick-label">快捷入口</div>
-    <div class="quick-row">
-        <a href="video-tool/">🎬 视频解析</a>
-        <a href="image-tool/">🖼️ 图片处理</a>
-        <a href="bg-remover/">✂️ 智能抠图</a>
-        <a href="image-composite/">🎨 溶图合成</a>
-        <a href="text-remover/">T 去文字</a>
-    </div>
-</section>
-
-<footer class="footer">
-    小小工具箱 &mdash; 轻量实用的在线工具集
-</footer>
+        </div>
+    </aside>
+</div>
 
 <script>
 // Theme
-const btn = document.getElementById('themeBtn');
+const themeBtn = document.getElementById('themeBtn');
 function setTheme(t) {
     document.documentElement.setAttribute('data-theme', t);
     localStorage.setItem('theme', t);
-    btn.textContent = t === 'dark' ? '☀' : '☾';
+    themeBtn.innerHTML = t === 'dark'
+        ? '<span class="nav-icon">☾</span> 切换主题'
+        : '<span class="nav-icon">☀</span> 切换主题';
 }
 setTheme(localStorage.getItem('theme') || 'light');
-btn.onclick = () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+themeBtn.onclick = () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+
+// Mobile sidebar
+const menuBtn = document.getElementById('menuBtn');
+const sidebar = document.getElementById('sidebar');
+const overlay = document.getElementById('overlay');
+menuBtn && menuBtn.addEventListener('click', () => {
+    sidebar.classList.add('open');
+    overlay.classList.add('show');
+});
+overlay.addEventListener('click', () => {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('show');
+});
 
 // Search & Filter
 const input = document.getElementById('searchInput');
 const cards = document.querySelectorAll('.tool-card');
 const empty = document.getElementById('emptyState');
 const countLabel = document.getElementById('countLabel');
-const filterBtns = document.querySelectorAll('.filter-btn');
+const allFilterBtns = document.querySelectorAll('.filter-btn');
+const sidebarNavItems = document.querySelectorAll('.sidebar-nav .nav-item[data-filter]');
 let _searchTimer = null;
 let _activeCategory = 'all';
 
 function applyFilters() {
-    const q = input.value.trim().toLowerCase();
+    const q = input ? input.value.trim().toLowerCase() : '';
     let n = 0;
     cards.forEach(c => {
         const kw = (c.dataset.kw || '') + ' ' + c.querySelector('h4').textContent + ' ' + c.querySelector('.card-body').textContent;
@@ -572,21 +720,32 @@ function applyFilters() {
         if (show) n++;
     });
     empty.classList.toggle('show', n === 0);
-    countLabel.textContent = q || _activeCategory !== 'all' ? n + ' 个结果' : cards.length + ' 个工具';
+    if (countLabel) countLabel.textContent = q || _activeCategory !== 'all' ? n + ' 个结果' : cards.length + ' 个工具';
 }
 
-input.addEventListener('input', () => {
-    clearTimeout(_searchTimer);
-    _searchTimer = setTimeout(applyFilters, 150);
-});
-
-filterBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-        filterBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        _activeCategory = btn.dataset.filter;
-        applyFilters();
+function setCategory(cat) {
+    _activeCategory = cat;
+    allFilterBtns.forEach(b => {
+        b.classList.toggle('active', b.dataset.filter === cat);
     });
+    sidebarNavItems.forEach(b => {
+        b.classList.toggle('active', b.dataset.filter === cat);
+    });
+    applyFilters();
+}
+
+if (input) {
+    input.addEventListener('input', () => {
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(applyFilters, 150);
+    });
+}
+
+allFilterBtns.forEach(btn => {
+    btn.addEventListener('click', () => setCategory(btn.dataset.filter));
+});
+sidebarNavItems.forEach(btn => {
+    btn.addEventListener('click', () => setCategory(btn.dataset.filter));
 });
 </script>
 </body>
