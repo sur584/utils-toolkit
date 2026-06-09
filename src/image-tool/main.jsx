@@ -1,0 +1,735 @@
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import ReactDOM from 'react-dom/client';
+import { fmt, ext, isImg, uid, showToast } from '../shared/utils.js';
+import { Upload, Download, X, Trash, Plus, Refresh } from '../shared/icons.jsx';
+import { Btn, UploadZone, Divider } from '../shared/components.jsx';
+
+// ==================== 全局状态管理（简易 Store） ====================
+let _images=[],_ls=new Set(),_tab='compress',_sel=new Set(),_preview=null,_previewImg=null,_cropResults=null;
+const sub=fn=>{_ls.add(fn);return()=>_ls.delete(fn)};
+const notify=()=>_ls.forEach(fn=>fn());
+const addImages=files=>{
+  const v=Array.from(files).filter(isImg);if(!v.length)return;
+  const n=v.map(f=>({id:uid(),file:f,origFile:f,origUrl:URL.createObjectURL(f),name:f.name,size:f.size,type:f.type,w:0,h:0,thumb:URL.createObjectURL(f),status:'idle',blob:null,cSize:null,cUrl:null,progress:0}));
+  n.forEach(img=>{const t=new Image();t.onload=()=>{img.w=t.naturalWidth;img.h=t.naturalHeight;URL.revokeObjectURL(t.src);notify()};t.src=URL.createObjectURL(img.file)});
+  _images=[..._images,...n];notify();
+};
+const rmImg=id=>{const i=_images.find(x=>x.id===id);if(i){URL.revokeObjectURL(i.thumb);if(i.cUrl)URL.revokeObjectURL(i.cUrl)}_images=_images.filter(x=>x.id!==id);_sel.delete(id);notify()};
+const clearAll=()=>{_images.forEach(i=>{URL.revokeObjectURL(i.thumb);if(i.cUrl)URL.revokeObjectURL(i.cUrl)});_images=[];_sel.clear();notify()};
+const upd=(id,u)=>{_images=_images.map(i=>i.id===id?{...i,...u}:i);notify()};
+const toggleSel=id=>{_sel.has(id)?_sel.delete(id):_sel.add(id);notify()};
+const selAll=()=>{_images.forEach(i=>_sel.add(i.id));notify()};
+const deselAll=()=>{_sel.clear();notify()};
+const setPreview=v=>{_preview=v;notify()};
+const setPreviewImg=v=>{_previewImg=v;notify()};
+const setCropResults=v=>{_cropResults=v;notify()};
+const useStore=()=>{const[,t]=useState(0);useEffect(()=>{const u=sub(()=>t(x=>x+1));return u},[]);return{images:_images,tab:_tab,sel:_sel,preview:_preview,previewImg:_previewImg,cropResults:_cropResults,setPreviewImg}};
+
+// Tool-specific icons (not in shared/icons.jsx)
+const I={
+  image:()=><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>,
+  zap:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
+  scissors:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></svg>,
+  arrow:()=><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
+  crop:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"/><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"/></svg>,
+  folder:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>,
+  clipboard:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect width="8" height="4" x="8" y="2" rx="1"/></svg>,
+  chevDown:()=><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
+  trending:()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>,
+  circle:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/></svg>,
+  square:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>,
+  roundedRect:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="6"/></svg>,
+  eye:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+};
+
+// ==================== 进度条组件 ====================
+function Progress({value=0,label,className=''}){
+  const v=Math.min(100,Math.max(0,value));
+  return <div className={`w-full ${className}`}>
+    {label&&<div className="flex items-center justify-between mb-1"><span className="text-xs text-gray-500">{label}</span><span className="text-xs text-gray-400">{Math.round(v)}%</span></div>}
+    <div className="w-full h-1.5 rounded-full bg-gray-100 overflow-hidden"><div className="h-full rounded-full bg-blue-500 transition-all duration-500" style={{width:v+'%'}}/></div>
+  </div>;
+}
+
+// ==================== 空状态占位 ====================
+function EmptyState(){
+  return <div className="flex-1 flex items-center justify-center h-full animate-fade-up">
+    <div className="text-center max-w-sm">
+      <div className="w-20 h-20 rounded-2xl bg-blue-50 flex items-center justify-center mx-auto mb-5 text-blue-500"><I.image/></div>
+      <h2 className="text-xl font-semibold text-gray-800 mb-2">拖入图片开始处理</h2>
+      <p className="text-sm text-gray-400 mb-5">支持 JPG、PNG、WEBP，可批量处理</p>
+      <div className="flex items-center justify-center gap-5 mb-5 text-xs text-gray-400">
+        <span className="flex items-center gap-1.5"><Upload/>拖拽</span>
+        <span className="flex items-center gap-1.5"><I.clipboard/>Ctrl+V</span>
+        <span className="flex items-center gap-1.5"><I.folder/>选择</span>
+      </div>
+      <UploadZone isButton onFiles={addImages} accept="image/jpeg,image/png,image/webp"/>
+    </div>
+  </div>;
+}
+
+// ==================== 图片卡片（左侧列表） ====================
+function ImageCard({image,selected,isActive}){
+  const s=image.cSize?((1-image.cSize/image.size)*100).toFixed(0):null;
+  return <div className={`flex items-center gap-2 p-2 rounded-lg transition-colors group animate-fade-up ${isActive?'bg-blue-50 border border-blue-200':'hover:bg-gray-50 border border-transparent'}`}>
+    <div onClick={e=>{e.stopPropagation();toggleSel(image.id)}} className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all ${selected?'bg-blue-500 border-blue-500':'border-gray-300 hover:border-blue-400'}`}>
+      {selected&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+    </div>
+    <div onClick={()=>setPreviewImg(image)} className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer">
+      <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={image.thumb} alt="" loading="lazy" className="w-full h-full object-cover"/></div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-800 truncate">{image.name}</p>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="text-xs text-gray-400">{fmt(image.size)}</span>
+          {s&&<span className="text-xs text-green-500">-{s}%</span>}
+        </div>
+      </div>
+    </div>
+    {image.status==='done'&&<span className="text-xs text-green-500">✓</span>}
+    {image.status==='error'&&<span className="text-xs text-red-400">✗</span>}
+    <button onClick={e=>{e.stopPropagation();rmImg(image.id)}} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-all"><X size={12}/></button>
+  </div>;
+}
+
+// ==================== 压缩面板 ====================
+function CompressPanel(){
+  const{images,sel}=useStore();
+  const[ts,setTs]=useState(500);const[unit,setUnit]=useState('KB');const[fmt2,setFmt2]=useState('keep');const[proc,setProc]=useState(false);
+  const targets=sel.size>0?images.filter(i=>sel.has(i.id)):images;
+  const tot=targets.reduce((a,i)=>a+i.size,0);const comp=targets.reduce((a,i)=>a+(i.cSize||0),0);
+  const dn=targets.filter(i=>i.status==='done').length;const sv=comp>0?((1-comp/tot)*100).toFixed(1):0;
+
+  const compressFile=(file,targetBytes,maxW)=>new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.naturalWidth,h=img.naturalHeight;
+      if(maxW&&w>maxW){h=Math.round(h*maxW/w);w=maxW}
+      const canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      const ctx=canvas.getContext('2d');
+      ctx.drawImage(img,0,0,w,h);
+      let lo=0.1,hi=0.95,best=null;
+      const outType=fmt2==='png'?'image/png':fmt2==='webp'?'image/webp':'image/jpeg';
+      const tryQ=(q)=>{
+        canvas.toBlob(b=>{
+          if(!b){reject(new Error('canvas toBlob failed'));return}
+          if(b.size<=targetBytes||lo>=hi){resolve(b);return}
+          if(b.size>targetBytes){hi=q-(hi-lo)/2}else{lo=q+(hi-lo)/2}
+          if(hi-lo<0.02){resolve(b);return}
+          tryQ((lo+hi)/2);
+        },outType,q);
+      };
+      tryQ(0.76);
+    };
+    img.onerror=reject;
+    img.src=URL.createObjectURL(file);
+  });
+
+  const compress=async()=>{
+    setProc(true);const tb=unit==='MB'?ts*1024*1024:ts*1024;
+    const pending=targets.filter(i=>i.status!=='done');
+    const CONC=3;const results=[];
+    let idx=0;
+    const worker=async()=>{
+      while(idx<pending.length){
+        const img=pending[idx++];if(!img)break;
+        const origState={blob:img.blob,cSize:img.cSize,cUrl:img.cUrl};
+        upd(img.id,{status:'compressing',progress:30});
+        try{
+          const sizeRatio=tb/img.size;
+          const maxW=sizeRatio<0.15?1200:sizeRatio<0.3?1920:sizeRatio<0.5?2560:99999;
+          const c=await compressFile(img.file,tb,maxW);
+          const url=URL.createObjectURL(c);
+          upd(img.id,{status:'done',blob:c,cSize:c.size,cUrl:url,progress:100});
+          results.push({name:img.name,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:c.size,blob:c,saving:((1-c.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile:new File([c],img.name,{type:c.type}),newBlob:c,newThumb:url,newCSize:c.size,newCUrl:url,origState});
+        }catch(e){upd(img.id,{status:'error'})}
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(CONC,pending.length)},()=>worker()));
+    setProc(false);
+    if(results.length)setPreview({type:'compress',items:results});
+  };
+  return <div className="h-full flex flex-col p-4 gap-3 animate-fade-up overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm flex-shrink-0">
+      <div className="flex items-center justify-between mb-3"><p className="text-base font-medium text-gray-700">压缩设置</p>{sel.size>0&&<span className="text-xs text-blue-500">已选 {sel.size} 张</span>}</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="text-xs text-gray-500 mb-1 block">目标大小</label><div className="flex items-center gap-1.5"><input type="number" value={ts} onChange={e=>setTs(Number(e.target.value))} className="flex-1 h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all"/><button onClick={()=>setUnit(u=>u==='KB'?'MB':'KB')} className="h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600 hover:bg-gray-100 transition-colors font-medium min-w-[52px] flex items-center justify-center gap-0.5">{unit}<I.chevDown/></button></div></div>
+        <div><label className="text-xs text-gray-500 mb-1 block">输出格式</label><select value={fmt2} onChange={e=>setFmt2(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600 outline-none cursor-pointer hover:bg-gray-100 transition-colors"><option value="keep">保持原格式</option><option value="jpg">JPG</option><option value="png">PNG</option><option value="webp">WEBP</option></select></div>
+      </div>
+    </div>
+    {dn>0&&<div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm animate-fade-up flex-shrink-0">
+      <div className="flex items-center gap-1.5 mb-2.5"><span className="text-green-500"><I.trending/></span><p className="text-base font-medium text-gray-700">压缩统计</p></div>
+      <div className="grid grid-cols-3 gap-3"><div><p className="text-xs text-gray-400">原始</p><p className="text-base font-semibold text-gray-800">{fmt(tot)}</p></div><div><p className="text-xs text-gray-400">压缩后</p><p className="text-base font-semibold text-blue-500">{fmt(comp)}</p></div><div><p className="text-xs text-gray-400">节省</p><p className="text-base font-semibold text-green-500">{sv}%</p></div></div>
+      <Progress value={dn/targets.length*100} label={`${dn}/${targets.length}`} className="mt-2.5"/>
+    </div>}
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+      <p className="text-xs text-gray-400 mb-1">图片列表 ({targets.length})</p>
+      {targets.map((img,i)=><div key={img.id} className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-gray-100 hover:border-gray-200 transition-all animate-fade-up" style={{animationDelay:`${i*25}ms`}}>
+        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" loading="lazy" className="w-full h-full object-cover"/></div>
+        <div className="flex-1 min-w-0"><p className="text-sm text-gray-700 truncate">{img.name}</p><div className="flex items-center gap-1.5 mt-0.5"><span className="text-xs text-gray-400">{fmt(img.size)}</span>{img.cSize&&<><span className="text-xs text-gray-300">→</span><span className="text-xs text-blue-500">{fmt(img.cSize)}</span></>}</div></div>
+        {img.status==='compressing'&&<Progress value={img.progress||0} className="w-16"/>}
+        {img.status==='done'&&<span className="text-xs text-green-500 font-medium">完成</span>}
+        {img.status==='error'&&<span className="text-xs text-red-400 font-medium">失败</span>}
+      </div>)}
+    </div>
+    <div className="flex items-center gap-2 pt-1 flex-shrink-0 flex-wrap"><Btn variant="primary" className="flex-1 min-w-0" onClick={compress} disabled={!targets.length||proc} loading={proc}><I.zap/>{sel.size>0?`压缩选中 (${sel.size})`:'开始压缩'}</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}>清空</Btn></div>
+  </div>;
+}
+
+// ==================== CROP PANEL ====================
+const RATIO_PRESETS=[
+  {l:'自由',v:null},{l:'1:1',v:1},{l:'4:3',v:4/3},{l:'3:4',v:3/4},
+  {l:'16:9',v:16/9},{l:'9:16',v:9/16},{l:'4:5',v:4/5},{l:'5:4',v:5/4},
+  {l:'3:2',v:3/2},{l:'2:3',v:2/3},{l:'2:1',v:2},{l:'1:2',v:0.5},
+];
+const SOCIAL_PRESETS=[
+  {l:'Instagram 帖子',w:1080,h:1080},{l:'Instagram 故事',w:1080,h:1920},{l:'Instagram 横幅',w:1080,h:566},
+  {l:'Facebook 帖子',w:1200,h:630},{l:'Facebook 封面',w:820,h:312},{l:'Twitter 帖子',w:1200,h:675},
+  {l:'YouTube 缩略图',w:1280,h:720},{l:'YouTube 横幅',w:2560,h:1440},{l:'LinkedIn 帖子',w:1200,h:627},
+  {l:'TikTok',w:1080,h:1920},{l:'小红书',w:1080,h:1440},{l:'微信朋友圈',w:1080,h:1080},
+];
+const SHAPE_OPTS=[{l:'矩形',v:'rect',icon:I.square},{l:'圆角',v:'rounded',icon:I.roundedRect},{l:'圆形',v:'circle',icon:I.circle}];
+
+// ==================== 裁剪面板 ====================
+function CropPanel(){
+  const{images,sel,previewImg,setPreviewImg}=useStore();
+  const[mode,setMode]=useState('manual');
+  const[ratio,setRatio]=useState(null);
+  const[shape,setShape]=useState('rect');
+  const[borderRadius,setBorderRadius]=useState(20);
+  const[pctW,setPctW]=useState(100);const[pctH,setPctH]=useState(100);
+  const[pxW,setPxW]=useState(800);const[pxH,setPxH]=useState(600);
+  const[socialPreset,setSocialPreset]=useState(null);
+  const[batchMode,setBatchMode]=useState('uniform');
+  const[idx,setIdx]=useState(0);
+  const[processing,setProcessing]=useState(false);
+  const containerRef=useRef(null);const imgRef=useRef(null);
+  const[cropBox,setCropBox]=useState({x:0,y:0,w:0,h:0});
+  const[dragging,setDragging]=useState(null);
+  const ds=useRef({mx:0,my:0,cx:0,cy:0,cw:0,ch:0});
+
+  useEffect(()=>{
+    if(previewImg){
+      const i=images.findIndex(x=>x.id===previewImg.id);
+      if(i>=0) setIdx(i);
+    }
+  },[previewImg]);
+
+  const img=images[idx];
+
+  const getImgRect=()=>{
+    const imgEl=imgRef.current,cont=containerRef.current;
+    if(!imgEl||!cont||!imgEl.naturalWidth)return null;
+    const cw=cont.clientWidth,ch=cont.clientHeight;
+    const nw=imgEl.naturalWidth,nh=imgEl.naturalHeight;
+    const s=Math.min(cw/nw,ch/nh);
+    const w=nw*s,h=nh*s;
+    return{x:(cw-w)/2,y:(ch-h)/2,w,h};
+  };
+
+  useEffect(()=>{
+    if(!imgRef.current||!containerRef.current)return;
+    const update=()=>{
+      const ir=getImgRect();if(!ir)return;
+      let cw,ch;
+      if(mode==='pixels'){const s=Math.min(ir.w/pxW,ir.h/pxH);cw=pxW*s;ch=pxH*s}
+      else if(mode==='social'&&socialPreset){const s=Math.min(ir.w/socialPreset.w,ir.h/socialPreset.h);cw=socialPreset.w*s;ch=socialPreset.h*s}
+      else if(mode==='percentage'){cw=ir.w*pctW/100;ch=ir.h*pctH/100}
+      else{cw=ir.w*0.8;ch=ir.h*0.8;if(ratio){if(cw/ch>ratio)ch=cw/ratio;else cw=ch*ratio;if(cw>ir.w){cw=ir.w;ch=cw/ratio}if(ch>ir.h){ch=ir.h;cw=ch*ratio}}}
+      setCropBox({x:(ir.w-cw)/2,y:(ir.h-ch)/2,w:cw,h:ch});
+    };
+    const imgEl=imgRef.current;
+    if(imgEl.complete)update();else imgEl.onload=update;
+    return()=>{imgEl.onload=null};
+  },[img,idx,mode,ratio,shape,socialPreset,pctW,pctH,pxW,pxH]);
+
+  const getCropCoords=()=>{const r=getImgRect()||{x:0,y:0,w:1,h:1};return{x:cropBox.x/r.w,y:cropBox.y/r.h,w:cropBox.w/r.w,h:cropBox.h/r.h}};
+
+  const calcCropForImage=(imgW,imgH)=>{
+    let ar=ratio||(mode==='social'&&socialPreset?socialPreset.w/socialPreset.h:null);
+    if(mode==='pixels'){const s=Math.min(imgW/pxW,imgH/pxH);return{x:(imgW-pxW*s)/(2*imgW),y:(imgH-pxH*s)/(2*imgH),w:(pxW*s)/imgW,h:(pxH*s)/imgH}}
+    if(mode==='social'&&socialPreset){const s=Math.min(imgW/socialPreset.w,imgH/socialPreset.h);return{x:(imgW-socialPreset.w*s)/(2*imgW),y:(imgH-socialPreset.h*s)/(2*imgH),w:(socialPreset.w*s)/imgW,h:(socialPreset.h*s)/imgH}}
+    if(mode==='percentage'){return{x:(1-pctW/100)/2,y:(1-pctH/100)/2,w:pctW/100,h:pctH/100}}
+    let cw=imgW*0.8,ch=imgH*0.8;
+    if(ar){if(cw/ch>ar)ch=cw/ar;else cw=ch*ar;if(cw>imgW){cw=imgW;ch=cw/ar}if(ch>imgH){ch=imgH;cw=ch*ar}}
+    return{x:(imgW-cw)/(2*imgW),y:(imgH-ch)/(2*imgH),w:cw/imgW,h:ch/imgH};
+  };
+
+  const handleDown=(e,type)=>{
+    e.preventDefault();e.stopPropagation();setDragging(type);
+    ds.current={mx:e.clientX,my:e.clientY,cx:cropBox.x,cy:cropBox.y,cw:cropBox.w,ch:cropBox.h};
+  };
+
+  useEffect(()=>{
+    if(!dragging)return;
+    const onMove=e=>{
+      const ir=getImgRect();if(!ir)return;
+      const dx=e.clientX-ds.current.mx,dy=e.clientY-ds.current.my;
+      const{cx,cy,cw,ch}=ds.current;
+      if(dragging==='move'){setCropBox(b=>({...b,x:Math.max(0,Math.min(ir.w-b.w,cx+dx)),y:Math.max(0,Math.min(ir.h-b.h,cy+dy))}));return}
+      const ar=ratio||(mode==='social'&&socialPreset?socialPreset.w/socialPreset.h:null);
+      let nw,nh,nx=cx,ny=cy;
+      if(dragging==='se'){nw=Math.max(20,cw+dx);nh=ar?nw/ar:ch+dy}
+      else if(dragging==='sw'){nw=Math.max(20,cw-dx);nh=ar?nw/ar:ch+dy;nx=cx+(cw-nw)}
+      else if(dragging==='ne'){nw=Math.max(20,cw+dx);nh=ar?nw/ar:ch-dy;ny=cy+(ch-nh)}
+      else if(dragging==='nw'){nw=Math.max(20,cw-dx);nh=ar?nw/ar:ch-dy;nx=cx+(cw-nw);ny=cy+(ch-nh)}
+      else return;
+      if(ar&&nh>ir.h){nh=ir.h;nw=nh*ar}
+      if(nw>ir.w){nw=ir.w;if(ar)nh=nw/ar}
+      nx=Math.max(0,Math.min(ir.w-nw,nx));ny=Math.max(0,Math.min(ir.h-nh,ny));
+      if(nx+nw>ir.w)nw=ir.w-nx;if(ny+nh>ir.h)nh=ir.h-ny;
+      setCropBox({x:nx,y:ny,w:nw,h:nh});
+    };
+    const onUp=()=>setDragging(null);
+    document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+    return()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp)};
+  },[dragging,ratio,mode,socialPreset]);
+
+  const doCrop=async(srcFile,customCoords)=>{
+    const bmp=await createImageBitmap(srcFile);
+    const c=customCoords||getCropCoords();
+    const sx=Math.round(c.x*bmp.width),sy=Math.round(c.y*bmp.height);
+    const dw=Math.round(c.w*bmp.width),dh=Math.round(c.h*bmp.height);
+    const canvas=document.createElement('canvas');
+    canvas.width=dw;canvas.height=dh;
+    const ctx=canvas.getContext('2d');
+    if(shape==='circle'){ctx.beginPath();ctx.ellipse(dw/2,dh/2,dw/2,dh/2,0,0,Math.PI*2);ctx.clip()}
+    else if(shape==='rounded'){const r=borderRadius*Math.min(dw,dh)/200;ctx.beginPath();ctx.roundRect(0,0,dw,dh,r);ctx.clip()}
+    ctx.drawImage(bmp,sx,sy,dw,dh,0,0,dw,dh);
+    const outType=shape!=='rect'?'image/png':(srcFile.type||'image/jpeg');
+    const cropped=await new Promise(r=>canvas.toBlob(r,outType,outType==='image/png'?1:0.95));
+    bmp.close();
+    return cropped;
+  };
+
+  const applyCropDirect=async()=>{
+    if(!img)return;setProcessing(true);
+    try{
+      const cropped=await doCrop(img.blob||img.file);
+      saveAs(cropped, img.name);
+      showToast('裁剪完成，已下载 ' + img.name, 'ok');
+    }catch(e){console.error('Crop failed:',e);showToast('裁剪失败: ' + e.message, 'err')}
+    setProcessing(false);
+  };
+
+  const applyCropAllDirect=async()=>{
+    setProcessing(true);
+    const targets=sel.size>0?images.filter(i=>sel.has(i.id)):images;
+    if(targets.length===1){
+      const t=targets[0];
+      try{
+        const cropped=await doCrop(t.blob||t.file);
+        saveAs(cropped, t.name);
+      }catch(e){}
+    } else if(targets.length>1){
+      const zip=new JSZip();
+      for(const t of targets){
+        try{
+          const bmp=await createImageBitmap(t.blob||t.file);
+          const cc=calcCropForImage(bmp.width,bmp.height);
+          bmp.close();
+          const cropped=await doCrop(t.blob||t.file,cc);
+          zip.file(t.name, cropped);
+        }catch(e){}
+      }
+      saveAs(await zip.generateAsync({type:'blob'}), 'cropped_images.zip');
+      showToast('批量裁剪完成，共处理 ' + targets.length + ' 张图片', 'ok');
+    }
+    setProcessing(false);
+  };
+
+  const previewCropSingle=async()=>{
+    if(!img)return;setProcessing(true);
+    try{
+      const origState={file:img.file,blob:img.blob,thumb:img.thumb,cSize:img.cSize,cUrl:img.cUrl};
+      const cropped=await doCrop(img.blob||img.file);
+      if(img.cUrl)URL.revokeObjectURL(img.cUrl);
+      const newFile=new File([cropped],img.name,{type:cropped.type});
+      const url=URL.createObjectURL(cropped);
+      upd(img.id,{file:newFile,blob:cropped,thumb:url,cSize:cropped.size,cUrl:url,status:'idle'});
+      setCropResults([{name:img.name,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState}]);
+    }catch(e){console.error('Crop preview failed:',e)}
+    setProcessing(false);
+  };
+
+  const previewCropAll=async()=>{
+    setProcessing(true);
+    const targets=sel.size>0?images.filter(i=>sel.has(i.id)):images;
+    const results=[];
+    for(const img of targets){
+      try{
+        const origState={file:img.file,blob:img.blob,thumb:img.thumb,cSize:img.cSize,cUrl:img.cUrl};
+        const bmp=await createImageBitmap(img.blob||img.file);
+        const cc=calcCropForImage(bmp.width,bmp.height);
+        bmp.close();
+        const cropped=await doCrop(img.blob||img.file,cc);
+        if(img.cUrl)URL.revokeObjectURL(img.cUrl);
+        const newFile=new File([cropped],img.name,{type:cropped.type});
+        const url=URL.createObjectURL(cropped);
+        upd(img.id,{file:newFile,blob:cropped,thumb:url,cSize:cropped.size,cUrl:url,status:'idle'});
+        results.push({name:img.name,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState});
+      }catch(e){}
+    }
+    if(results.length)setCropResults(results);
+    setProcessing(false);
+  };
+
+  const handleApplyCrop=batchMode==='uniform'?applyCropAllDirect:applyCropDirect;
+  const handlePreviewCrop=batchMode==='uniform'?previewCropAll:previewCropSingle;
+
+  const resetCrop=()=>{
+    const imgEl=imgRef.current,cont=containerRef.current;
+    if(!imgEl||!cont)return;
+    setCropResults(null);
+    if(batchMode==='uniform'&&sel.size>1){
+      const targets=images.filter(i=>sel.has(i.id));
+      targets.forEach(t=>{
+        if(t.origFile&&t.file!==t.origFile){
+          if(t.cUrl)URL.revokeObjectURL(t.cUrl);
+          const newUrl=URL.createObjectURL(t.origFile);
+          upd(t.id,{file:t.origFile,blob:t.origFile,thumb:newUrl,cSize:null,cUrl:null});
+        }
+      });
+      return;
+    }
+    if(img.origFile&&img.file!==img.origFile){
+      if(img.cUrl)URL.revokeObjectURL(img.cUrl);
+      const newUrl=URL.createObjectURL(img.origFile);
+      upd(img.id,{file:img.origFile,blob:img.origFile,thumb:newUrl,cSize:null,cUrl:null});
+      return;
+    }
+    const doReset=()=>{
+      if(!imgEl.naturalWidth){requestAnimationFrame(doReset);return}
+      const cw=cont.clientWidth,ch=cont.clientHeight;
+      const nw=imgEl.naturalWidth,nh=imgEl.naturalHeight;
+      if(!nw||!nh||!cw||!ch)return;
+      const s=Math.min(cw/nw,ch/nh);
+      const iw=nw*s,ih=nh*s;
+      let bw=iw*0.8,bh=ih*0.8;
+      if(ratio){if(bw/bh>ratio)bh=bw/ratio;else bw=bh*ratio;if(bw>iw){bw=iw;bh=bw/ratio}if(bh>ih){bh=ih;bw=bh/ratio}}
+      setCropBox({x:(iw-bw)/2,y:(ih-bh)/2,w:bw,h:bh});
+    };
+    doReset();
+  };
+
+  if(!img)return<EmptyState/>;
+
+  const isCircle=shape==='circle';
+  const ir=getImgRect()||{x:0,y:0,w:0,h:0};
+  const bx=ir.x+cropBox.x,by=ir.y+cropBox.y;
+  const boxStyle={left:bx,top:by,width:cropBox.w,height:cropBox.h,borderRadius:isCircle?'50%':shape==='rounded'?borderRadius+'px':'0'};
+
+  return <div className="h-full flex flex-col overflow-hidden animate-fade-up">
+    <div className="flex items-center gap-1 px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
+      {[{id:'manual',l:'手动'},{id:'percentage',l:'百分比'},{id:'pixels',l:'像素'},{id:'social',l:'社媒'},{id:'shape',l:'形状'}].map(m=>
+        <button key={m.id} onClick={()=>setMode(m.id)} className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${mode===m.id?'bg-blue-500 text-white':'text-gray-500 hover:bg-gray-100'}`}>{m.l}</button>
+      )}
+      <div className="flex-1"/>
+      <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+        <button onClick={()=>setBatchMode('uniform')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${batchMode==='uniform'?'bg-white text-gray-800 shadow-sm':'text-gray-500'}`}>统一裁剪</button>
+        <button onClick={()=>setBatchMode('individual')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${batchMode==='individual'?'bg-white text-gray-800 shadow-sm':'text-gray-500'}`}>单独裁剪</button>
+      </div>
+    </div>
+
+    <div className="px-4 py-3 bg-white border-b border-gray-100 flex-shrink-0">
+      {mode==='manual'&&<div className="flex flex-wrap gap-1.5">
+        {RATIO_PRESETS.map(p=><button key={p.l} onClick={()=>setRatio(p.v)} className={`px-3 py-2 rounded-lg text-sm font-medium transition-all border ${ratio===p.v?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}>{p.l}</button>)}
+      </div>}
+      {mode==='percentage'&&<div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500 w-8">宽%</span><input type="range" min="1" max="100" value={pctW} onChange={e=>setPctW(Number(e.target.value))} className="flex-1"/><input type="number" value={pctW} onChange={e=>setPctW(Math.min(100,Math.max(1,Number(e.target.value))))} className="w-16 h-8 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/></div>
+        <div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500 w-8">高%</span><input type="range" min="1" max="100" value={pctH} onChange={e=>setPctH(Number(e.target.value))} className="flex-1"/><input type="number" value={pctH} onChange={e=>setPctH(Math.min(100,Math.max(1,Number(e.target.value))))} className="w-16 h-8 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/></div>
+      </div>}
+      {mode==='pixels'&&<div className="flex items-center gap-4">
+        <div className="flex items-center gap-2"><span className="text-xs text-gray-500">宽</span><input type="number" value={pxW} onChange={e=>setPxW(Math.min(10000,Math.max(1,Number(e.target.value))))} className="w-20 h-8 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/><span className="text-xs text-gray-400">px</span></div>
+        <span className="text-gray-300">×</span>
+        <div className="flex items-center gap-2"><span className="text-xs text-gray-500">高</span><input type="number" value={pxH} onChange={e=>setPxH(Math.min(10000,Math.max(1,Number(e.target.value))))} className="w-20 h-8 px-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 outline-none text-center"/><span className="text-xs text-gray-400">px</span></div>
+      </div>}
+      {mode==='social'&&<div className="grid grid-cols-4 gap-1.5 max-h-24 overflow-y-auto">
+        {SOCIAL_PRESETS.map(p=><button key={p.l} onClick={()=>setSocialPreset(p)} className={`px-2.5 py-2 rounded-lg text-xs font-medium transition-all border text-left ${socialPreset?.l===p.l?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}><div>{p.l}</div><div className="text-[11px] text-gray-400">{p.w}×{p.h}</div></button>)}
+      </div>}
+      {mode==='shape'&&<div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5">{SHAPE_OPTS.map(s=><button key={s.v} onClick={()=>setShape(s.v)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all border ${shape===s.v?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}><s.icon/>{s.l}</button>)}</div>
+        {shape==='rounded'&&<div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500">圆角</span><input type="range" min="5" max="100" value={borderRadius} onChange={e=>setBorderRadius(Number(e.target.value))} className="flex-1"/><span className="text-xs text-gray-500 w-8">{borderRadius}px</span></div>}
+      </div>}
+    </div>
+
+    <div ref={containerRef} className="flex-1 relative bg-gray-100 m-3 rounded-xl overflow-hidden select-none">
+      <img ref={imgRef} src={img.thumb} alt="" className="absolute inset-0 m-auto max-w-full max-h-full object-contain pointer-events-none"/>
+      <div className="absolute inset-0 pointer-events-none" style={{background:isCircle
+        ?`radial-gradient(ellipse ${cropBox.w/2}px ${cropBox.h/2}px at ${bx+cropBox.w/2}px ${by+cropBox.h/2}px, transparent 60%, rgba(0,0,0,.5) 100%)`
+        :`linear-gradient(to right, rgba(0,0,0,.5) ${bx}px, transparent ${bx}px, transparent ${bx+cropBox.w}px, rgba(0,0,0,.5) ${bx+cropBox.w}px)`}}/>
+      {!isCircle&&<><div className="absolute pointer-events-none" style={{left:0,right:0,top:0,height:by,background:'rgba(0,0,0,.5)'}}/><div className="absolute pointer-events-none" style={{left:0,right:0,top:by+cropBox.h,bottom:0,background:'rgba(0,0,0,.5)'}}/></>}
+      <div className="absolute border-2 border-white cursor-move" style={boxStyle} onMouseDown={e=>handleDown(e,'move')}>
+        {!isCircle&&<div className="absolute inset-0 pointer-events-none">
+          <div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/40"/><div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/40"/>
+          <div className="absolute top-1/3 left-0 right-0 h-px bg-white/40"/><div className="absolute top-2/3 left-0 right-0 h-px bg-white/40"/>
+        </div>}
+        {[{t:'nw',c:'-top-1.5 -left-1.5 cursor-nw-resize'},{t:'ne',c:'-top-1.5 -right-1.5 cursor-ne-resize'},{t:'sw',c:'-bottom-1.5 -left-1.5 cursor-sw-resize'},{t:'se',c:'-bottom-1.5 -right-1.5 cursor-se-resize'}].map(h=>
+          !isCircle&&<div key={h.t} className={`absolute w-2.5 h-2.5 bg-white rounded-sm shadow border border-gray-300 ${h.c}`} style={{transform:'translate(-50%,-50%)'}} onMouseDown={e=>handleDown(e,h.t)}/>
+        )}
+        <div className="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] whitespace-nowrap">{Math.round(cropBox.w)}×{Math.round(cropBox.h)}</div>
+      </div>
+    </div>
+
+    <div className="flex items-center justify-between px-4 py-3 flex-wrap gap-2">
+      <div className="flex items-center gap-2">
+        <Btn variant="ghost" size="sm" onClick={()=>{const i=Math.max(0,idx-1);setIdx(i);setPreviewImg(images[i])}} disabled={idx===0}>上一张</Btn>
+        <span className="text-xs text-gray-500">{idx+1}/{images.length}</span>
+        <Btn variant="ghost" size="sm" onClick={()=>{const i=Math.min(images.length-1,idx+1);setIdx(i);setPreviewImg(images[i])}} disabled={idx===images.length-1}>下一张</Btn>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <Btn variant="ghost" size="sm" onClick={resetCrop}><Refresh/>重置</Btn>
+        <Btn variant="ghost" size="sm" onClick={handlePreviewCrop} disabled={processing} loading={processing}><I.eye/>预览效果</Btn>
+        <Btn variant="primary" size="sm" onClick={handleApplyCrop} disabled={processing} loading={processing}><Download/>{batchMode==='uniform'&&sel.size>0?`应用裁剪 (${sel.size})`:'应用裁剪'}</Btn>
+      </div>
+    </div>
+  </div>;
+}
+
+// ==================== 下载面板 ====================
+function DownloadPanel(){
+  const{images}=useStore();
+  const proc=images.filter(i=>i.blob);const tot=images.reduce((a,i)=>a+i.size,0);
+  const comp=proc.reduce((a,i)=>a+(i.cSize||i.size),0);const sv=comp>0?((1-comp/tot)*100).toFixed(1):0;
+  const dl=img=>{const b=img.blob||img.file;saveAs(b,img.name)};
+  const dlAll=async()=>{if(!proc.length)return;const zip=new JSZip();proc.forEach(img=>{const b=img.blob||img.file;zip.file(img.name,b)});saveAs(await zip.generateAsync({type:'blob'}),'images.zip')};
+  return <div className="h-full flex flex-col p-4 gap-3 overflow-y-auto animate-fade-up">
+    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+      <p className="text-base font-medium text-gray-700 mb-2.5">下载概览</p>
+      <div className="grid grid-cols-3 gap-3"><div><p className="text-xs text-gray-400">总图片</p><p className="text-xl font-semibold text-gray-800">{images.length}</p></div><div><p className="text-xs text-gray-400">已处理</p><p className="text-xl font-semibold text-blue-500">{proc.length}</p></div><div><p className="text-xs text-gray-400">压缩率</p><p className="text-xl font-semibold text-green-500">{sv}%</p></div></div>
+    </div>
+    <div className="flex-1">
+      <div className="flex items-center px-3 py-2 text-xs text-gray-400 font-medium border-b border-gray-100"><span className="flex-1">文件名</span><span className="w-16 text-right">原始</span><span className="w-16 text-right">处理后</span><span className="w-12 text-right">节省</span><span className="w-12 text-right">操作</span></div>
+      <div className="space-y-0.5">{images.map((img,i)=>{const has=!!img.blob;const s=has&&img.cSize?((1-img.cSize/img.size)*100).toFixed(0):null;return<div key={img.id} className="flex items-center px-3 py-2.5 rounded-lg hover:bg-gray-50 transition-colors animate-fade-up" style={{animationDelay:`${i*20}ms`}}>
+        <div className="flex-1 flex items-center gap-2 min-w-0"><div className="w-8 h-8 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" loading="lazy" className="w-full h-full object-cover"/></div><span className="text-sm text-gray-700 truncate">{img.name}</span></div>
+        <span className="w-16 text-right text-xs text-gray-400">{fmt(img.size)}</span>
+        <span className="w-16 text-right text-xs text-gray-500">{has?fmt(img.cSize||img.size):'-'}</span>
+        <span className="w-12 text-right text-xs text-green-500 font-medium">{s?s+'%':'-'}</span>
+        <div className="w-16 text-right flex items-center justify-end gap-1">
+          {has&&<button onClick={()=>dl(img)} className="text-xs text-blue-500 hover:text-blue-700 font-medium">下载</button>}
+          <button onClick={()=>rmImg(img.id)} className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors"><X size={12}/></button>
+        </div>
+      </div>})}
+      </div>
+    </div>
+    <div className="flex items-center gap-2"><Btn variant="primary" className="flex-1" onClick={dlAll} disabled={!proc.length}><Download/>下载全部 (ZIP)</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}><Trash size={12}/>清空全部</Btn></div>
+  </div>;
+}
+
+// ==================== 压缩/裁剪结果预览弹窗 ====================
+function PreviewModal(){
+  const{preview}=useStore();
+  const[removed,setRemoved]=useState(new Set());
+  const[names,setNames]=useState(()=>preview?preview.items.map(it=>it.name):[]);
+  useEffect(()=>{if(preview)setNames(preview.items.map(it=>it.name))},[preview]);
+  if(!preview)return null;
+  const{items,type}=preview;
+  const keptIdx=items.map((_,i)=>i).filter(i=>!removed.has(i));
+  const close=()=>{
+    items.forEach((item,i)=>{
+      if(removed.has(i)&&item.imgId&&item.origState){
+        upd(item.imgId,{...item.origState,status:'idle'});
+      }
+    });
+    setPreview(null);
+  };
+  const toggleRemove=i=>setRemoved(s=>{const n=new Set(s);n.has(i)?n.delete(i):n.add(i);return n});
+  const updateName=(i,v)=>setNames(prev=>{const n=[...prev];n[i]=v;return n});
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-up" onClick={close}>
+    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 max-h-[85vh] flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <h3 className="text-base font-semibold text-gray-800">{type==='compress'?'压缩结果':'裁剪结果'} ({keptIdx.length}/{items.length} 保留)</h3>
+        <button onClick={close} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"><X size={12}/></button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-5">
+        <div className="grid grid-cols-2 gap-4">
+          {items.map((item,i)=>{
+            const isOff=removed.has(i);
+            return <div key={i} className={`relative bg-gray-50 rounded-xl p-3 animate-fade-up transition-all ${isOff?'opacity-40 grayscale':'hover:shadow-md'}`} style={{animationDelay:`${i*60}ms`}}>
+              <button onClick={()=>toggleRemove(i)} className={`absolute top-2 right-2 z-10 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs transition-all ${isOff?'bg-gray-400 hover:bg-gray-500':'bg-red-400 hover:bg-red-500'}`} title={isOff?'恢复此图':'移除此结果'}><X size={12}/></button>
+              <input type="text" value={names[i]||item.name} onChange={e=>updateName(i,e.target.value)}
+                className={`w-full text-sm font-medium mb-2 px-2 py-1.5 rounded border bg-white outline-none transition-all ${isOff?'text-gray-400 line-through border-transparent':'text-gray-700 border-gray-200 focus:border-blue-400'}`}/>
+              <div className="flex gap-3 mb-3">
+                <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-200">
+                  <img src={item.origUrl} alt="" className="w-full h-40 object-contain"/>
+                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/50 text-white text-[11px]">原图</span>
+                </div>
+                <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-200">
+                  <img src={item.resultUrl} alt="" className="w-full h-40 object-contain"/>
+                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-blue-500/80 text-white text-[11px]">{type==='compress'?'压缩后':'裁剪后'}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div><p className="text-[11px] text-gray-400">原始大小</p><p className="text-xs font-semibold text-gray-700">{fmt(item.origSize)}</p></div>
+                <div><p className="text-[11px] text-gray-400">处理后</p><p className="text-xs font-semibold text-blue-500">{fmt(item.resultSize)}</p></div>
+                <div><p className="text-[11px] text-gray-400">节省空间</p><p className="text-xs font-semibold text-green-500">{item.saving}</p></div>
+              </div>
+            </div>;
+          })}
+        </div>
+      </div>
+      <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
+        <Btn variant="ghost" size="sm" onClick={close}>关闭</Btn>
+        <Btn variant="primary" size="sm" disabled={!keptIdx.length} onClick={async()=>{
+          if(keptIdx.length===1){const i=keptIdx[0];saveAs(items[i].blob,names[i]||items[i].name)}
+          else{const zip=new JSZip();keptIdx.forEach(i=>zip.file(names[i]||items[i].name,items[i].blob));saveAs(await zip.generateAsync({type:'blob'}),'images.zip')}
+          close()
+        }}><Download/>下载保留项 ({keptIdx.length})</Btn>
+      </div>
+    </div>
+  </div>;
+}
+
+// ==================== 裁剪结果预览面板（右侧） ====================
+function CropResultsPanel(){
+  const{cropResults}=useStore();
+  const[removed,setRemoved]=useState(new Set());
+  const[names,setNames]=useState(()=>cropResults?cropResults.map(it=>it.name):[]);
+  useEffect(()=>{if(cropResults)setNames(cropResults.map(it=>it.name))},[cropResults]);
+  if(!cropResults||!cropResults.length)return null;
+  const keptIdx=cropResults.map((_,i)=>i).filter(i=>!removed.has(i));
+  const toggleRemove=i=>setRemoved(s=>{const n=new Set(s);n.has(i)?n.delete(i):n.add(i);return n});
+  const updateName=(i,v)=>setNames(prev=>{const n=[...prev];n[i]=v;return n});
+  const downloadAll=async()=>{
+    if(keptIdx.length===1){const i=keptIdx[0];saveAs(cropResults[i].blob,names[i]||cropResults[i].name);return}
+    if(keptIdx.length>1){const zip=new JSZip();keptIdx.forEach(i=>zip.file(names[i]||cropResults[i].name,cropResults[i].blob));saveAs(await zip.generateAsync({type:'blob'}),'images.zip')}
+  };
+  return <div className="flex-1 flex flex-col bg-[#f5f7fa] overflow-hidden">
+    <div className="flex items-center justify-between px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
+      <div className="flex items-center gap-2">
+        <span className="text-base font-medium text-gray-700">裁剪预览</span>
+        <span className="text-xs text-gray-400">{keptIdx.length}/{cropResults.length} 保留</span>
+      </div>
+      <button onClick={()=>setCropResults(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"><X size={12}/></button>
+    </div>
+    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      {cropResults.map((item,i)=>{
+        const isOff=removed.has(i);
+        return <div key={i} className={`bg-white rounded-xl border border-gray-100 p-3 transition-all ${isOff?'opacity-40 grayscale':'hover:shadow-md'}`}>
+          <div className="flex items-center gap-2 mb-2">
+            <input type="text" value={names[i]||item.name} onChange={e=>updateName(i,e.target.value)}
+              className={`flex-1 min-w-0 text-sm font-medium px-2 py-1.5 rounded border bg-white outline-none transition-all ${isOff?'text-gray-400 line-through border-transparent':'text-gray-700 border-gray-200 focus:border-blue-400'}`}/>
+            <button onClick={()=>toggleRemove(i)} className={`p-1 rounded-full transition-colors flex-shrink-0 ${isOff?'bg-gray-200 text-gray-400 hover:bg-gray-300':'bg-red-50 text-red-400 hover:bg-red-100'}`} title={isOff?'恢复此图':'移除此结果'}>
+              {isOff?<Plus/>:<X size={12}/>}
+            </button>
+          </div>
+          <div className="flex gap-2 mb-2">
+            <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-100">
+              <img src={item.origUrl} alt="" className="w-full h-32 object-contain"/>
+              <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/50 text-white text-[11px]">原图</span>
+            </div>
+            <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-100">
+              <img src={item.resultUrl} alt="" className="w-full h-32 object-contain"/>
+              <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-blue-500/80 text-white text-[11px]">裁剪后</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div><p className="text-[11px] text-gray-400">原始</p><p className="text-xs font-semibold text-gray-700">{fmt(item.origSize)}</p></div>
+            <div><p className="text-[11px] text-gray-400">裁剪后</p><p className="text-xs font-semibold text-blue-500">{fmt(item.resultSize)}</p></div>
+            <div><p className="text-[11px] text-gray-400">节省</p><p className="text-xs font-semibold text-green-500">{item.saving}</p></div>
+          </div>
+        </div>;
+      })}
+    </div>
+    <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100 bg-white flex-shrink-0">
+      <Btn variant="ghost" size="sm" onClick={()=>setCropResults(null)}>关闭</Btn>
+      <Btn variant="primary" size="sm" disabled={!keptIdx.length} onClick={downloadAll}><Download/>一键下载 ({keptIdx.length})</Btn>
+    </div>
+  </div>;
+}
+
+// ==================== IMAGE PREVIEW ====================
+function ImagePreview(){
+  const{images,previewImg,cropResults}=useStore();
+  if(cropResults&&cropResults.length)return <CropResultsPanel/>;
+  const current=previewImg?images.find(i=>i.id===previewImg.id):null;
+  if(!current)return <div className="flex-1 flex items-center justify-center bg-[#f5f7fa]"><p className="text-base text-gray-400">点击左侧图片进行预览</p></div>;
+  const s=current.cSize?((1-current.cSize/current.size)*100).toFixed(0):null;
+  return <div className="flex-1 flex flex-col bg-[#f5f7fa] overflow-hidden">
+    <div className="flex items-center justify-between px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-base font-medium text-gray-700 truncate">{current.name}</span>
+        <span className="text-xs text-gray-400 flex-shrink-0">{fmt(current.size)}</span>
+        {current.cSize&&<span className="text-xs text-green-500 flex-shrink-0">→ {fmt(current.cSize)} ({s}%)</span>}
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {current.w>0&&<span className="text-xs text-gray-400">{current.w}×{current.h}</span>}
+        <span className="text-xs text-gray-400 uppercase">{ext(current.type)}</span>
+      </div>
+    </div>
+    <div className="flex-1 flex items-center justify-center p-4 overflow-hidden">
+      <img src={current.thumb} alt="" className="max-w-full max-h-full object-contain rounded-lg shadow-sm"/>
+    </div>
+  </div>;
+}
+
+// ==================== 主应用组件 ====================
+function App(){
+  const{images,tab,sel,preview,previewImg}=useStore();
+  const has=images.length>0;
+  const tabs=[{id:'compress',l:'压缩',icon:I.zap},{id:'crop',l:'裁剪',icon:I.scissors},{id:'download',l:'下载',icon:Download}];
+  const tot=images.reduce((a,i)=>a+i.size,0);const comp=images.reduce((a,i)=>a+(i.cSize||0),0);
+  const selCount=sel.size;
+
+  const [isMobile,setIsMobile]=useState(window.innerWidth<=900);
+  useEffect(()=>{
+    const onResize=()=>setIsMobile(window.innerWidth<=900);
+    window.addEventListener('resize',onResize);
+    return()=>window.removeEventListener('resize',onResize);
+  },[]);
+
+  const [sidebarW,setSidebarW]=useState(isMobile?window.innerWidth:256);
+  const [rightW,setRightW]=useState(420);
+  const containerRef=useRef(null);
+  const handleSidebarDrag=(clientX)=>{
+    if(!containerRef.current)return;
+    const rect=containerRef.current.getBoundingClientRect();
+    setSidebarW(Math.max(200,Math.min(clientX-rect.left,400)));
+  };
+  const handleRightDrag=(clientX)=>{
+    if(!containerRef.current)return;
+    const rect=containerRef.current.getBoundingClientRect();
+    setRightW(Math.max(300,Math.min(rect.right-clientX,600)));
+  };
+
+  return <div className="flex flex-col h-screen">
+    <div className="flex items-center h-12 px-5 bg-white border-b border-gray-100 flex-shrink-0">
+      <a href="../../" className="flex items-center gap-1 text-sm text-gray-400 hover:text-blue-500 transition-colors mr-4 no-underline">← 工具箱</a>
+      <div className="flex items-center gap-2.5"><div className="w-6 h-6 rounded bg-blue-500 flex items-center justify-center text-white"><I.image/></div><span className="text-base font-semibold text-gray-700">图片批量处理</span></div>
+    </div>
+    <div ref={containerRef} className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col bg-white border-r border-gray-100 flex-shrink-0" style={{width:sidebarW}}>
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-50">
+          <div className="flex items-center gap-1.5"><span className="text-sm font-medium text-gray-700">图片列表</span><span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-500 font-medium">{images.length}</span></div>
+          {images.length>0&&<button onClick={clearAll} className="text-xs text-gray-400 hover:text-red-400 transition-colors flex items-center gap-0.5"><Trash size={12}/>清空</button>}
+        </div>
+        {images.length>0&&<div className="flex items-center gap-2 px-3 py-2 border-b border-gray-50">
+          <button onClick={selCount===images.length?deselAll:selAll} className="text-xs text-blue-500 hover:text-blue-700 font-medium">{selCount===images.length?'取消全选':'全选'}</button>
+          {selCount>0&&<span className="text-xs text-gray-400">已选 {selCount}/{images.length}</span>}
+        </div>}
+        <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">{images.length===0?<div className="p-1.5"><UploadZone onFiles={addImages} accept="image/jpeg,image/png,image/webp"/></div>:images.map(img=><ImageCard key={img.id} image={img} selected={sel.has(img.id)} isActive={previewImg?.id===img.id}/>)}</div>
+        {images.length>0&&<div className="p-2 border-t border-gray-50"><UploadZone isButton onFiles={addImages} accept="image/jpeg,image/png,image/webp"/></div>}
+      </div>
+      {!isMobile&&<Divider onDrag={handleSidebarDrag}/>}
+      <div className="flex-1 flex overflow-hidden" style={{background:'var(--bg-primary, #f5f7fa)'}}>
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <div className="flex items-center gap-1 px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
+            {tabs.map(t=><button key={t.id} onClick={()=>{_tab=t.id;notify()}} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${tab===t.id?'bg-blue-500 text-white':'text-gray-500 hover:bg-gray-100'}`}><t.icon/>{t.l}</button>)}
+          </div>
+          <div className="flex-1 overflow-hidden">{!has?<EmptyState/>:<div key={tab} className="h-full">{tab==='compress'&&<CompressPanel/>}{tab==='crop'&&<CropPanel/>}{tab==='download'&&<DownloadPanel/>}</div>}</div>
+        </div>
+        {has&&!isMobile&&<>
+          <Divider onDrag={handleRightDrag}/>
+          <div className="overflow-hidden flex flex-col flex-shrink-0" style={{width:rightW}}><ImagePreview/></div>
+        </>}
+      </div>
+    </div>
+    <div className="flex items-center justify-between h-7 px-5 bg-white border-t border-gray-100 flex-shrink-0">
+      <div className="flex items-center gap-3 text-xs text-gray-400"><span>{images.length} 张</span><span>{fmt(tot)}</span>{comp>0&&<span className="text-blue-500">压缩后 {fmt(comp)} ({((1-comp/tot)*100).toFixed(1)}% 节省)</span>}</div>
+      <div className="flex items-center gap-1 text-xs text-gray-400"><div className="w-1.5 h-1.5 rounded-full bg-green-400"/>就绪</div>
+    </div>
+    {preview&&<PreviewModal/>}
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);

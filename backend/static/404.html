@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>页面未找到 - 小小工具箱</title>
+<link rel="stylesheet" href="tools/libs/theme.css">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.container {
+    text-align: center;
+    max-width: 500px;
+}
+.error-code {
+    font-size: 120px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #6366f1, #a78bfa, #ec4899);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1;
+    margin-bottom: 16px;
+}
+.error-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+}
+.error-desc {
+    font-size: 15px;
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+    line-height: 1.6;
+}
+.btn-home {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #fff;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.25s;
+    box-shadow: 0 4px 14px rgba(99,102,241,0.3);
+}
+.btn-home:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(99,102,241,0.4);
+}
+.tools-section {
+    margin-top: 48px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+    width: 100%;
+}
+.tools-section h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+.tools-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+}
+.tool-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+.tool-link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+@media (max-width: 480px) {
+    .error-code { font-size: 80px; }
+    .error-title { font-size: 20px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="error-code">404</div>
+    <h1 class="error-title">页面未找到</h1>
+    <p class="error-desc">抱歉，你访问的页面不存在或已被移动。</p>
+    <a href="/" class="btn-home">← 返回首页</a>
+    <div class="tools-section">
+        <h3>或者试试这些工具</h3>
+        <div class="tools-grid">
+            <a href="/tools/video-tool/" class="tool-link">🎬 视频解析</a>
+            <a href="/tools/image-tool/" class="tool-link">🖼️ 图片处理</a>
+            <a href="/tools/bg-remover/" class="tool-link">✂️ 智能抠图</a>
+            <a href="/tools/image-composite/" class="tool-link">🎨 溶图合成</a>
+            <a href="/tools/text-remover/" class="tool-link">T 去文字</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>

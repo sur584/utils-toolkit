@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 class ImageOptimizer:
     """模型相关的图片预处理"""
 
-    MODEL_MAX_DIMS = {
-        "bria-rmbg": 2048,
-        "isnet-general-use": 1536,
-        "u2net": 1024,
-    }
+    def __init__(self, model_manager=None):
+        if model_manager is None:
+            from .model_manager import ModelManager
+            model_manager = ModelManager()
+        self._model_manager = model_manager
 
     def preprocess(self, data: bytes, model_name: str) -> Image.Image:
         """
@@ -48,7 +48,7 @@ class ImageOptimizer:
         img = self._normalize_mode(img)
 
         # 模型相关尺寸限制
-        max_dim = self.MODEL_MAX_DIMS.get(model_name, 2048)
+        max_dim = self.get_max_dim(model_name)
         if max(img.size) > max_dim:
             ratio = max_dim / max(img.size)
             new_size = (int(img.width * ratio), int(img.height * ratio))
@@ -80,4 +80,5 @@ class ImageOptimizer:
             )
 
     def get_max_dim(self, model_name: str) -> int:
-        return self.MODEL_MAX_DIMS.get(model_name, 2048)
+        cfg = self._model_manager.get_model_params(model_name)
+        return cfg.get("max_dim", 2048)

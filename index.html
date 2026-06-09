@@ -4,42 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>小小工具箱 - 实用在线工具集</title>
+<meta name="description" content="小小工具箱 - 集合视频解析下载、图片批量处理、AI智能抠图、溶图合成、智能去文字等实用工具的免费在线工具箱">
+<meta property="og:title" content="小小工具箱 - 实用在线工具集">
+<meta property="og:description" content="视频解析、图片处理、AI抠图...一站式工具集合">
+<meta property="og:type" content="website">
+<meta name="robots" content="index, follow">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+<link rel="stylesheet" href="tools/libs/theme.css">
 <style>
-/* ─── CSS Variables ─── */
-:root {
-    --bg-primary: #0f1117;
-    --bg-secondary: #161822;
-    --bg-card: #1c1f2e;
-    --bg-hover: #232738;
-    --border: #2a2e3f;
-    --text-primary: #e2e8f0;
-    --text-secondary: #8b95a8;
-    --text-muted: #5a6478;
-    --accent: #6366f1;
-    --accent-hover: #818cf8;
-    --accent-glow: rgba(99, 102, 241, 0.15);
-    --blue: #3b82f6;
-    --green: #10b981;
-    --orange: #f59e0b;
-    --pink: #ec4899;
-    --radius: 12px;
-    --radius-sm: 8px;
-}
-[data-theme="light"] {
-    --bg-primary: #f5f6fa;
-    --bg-secondary: #ffffff;
-    --bg-card: #ffffff;
-    --bg-hover: #f0f1f5;
-    --border: #e2e5ed;
-    --text-primary: #1a1d2e;
-    --text-secondary: #5a6478;
-    --text-muted: #9ca3af;
-    --accent: #6366f1;
-    --accent-hover: #4f46e5;
-    --accent-glow: rgba(99, 102, 241, 0.08);
-}
-
 /* ─── Reset ─── */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -128,27 +100,6 @@ a { text-decoration: none; color: inherit; }
     background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(99,102,241,0.1) 0%, transparent 70%);
     pointer-events: none;
 }
-.hero-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 14px;
-    border-radius: 20px;
-    background: var(--accent-glow);
-    border: 1px solid rgba(99,102,241,0.2);
-    color: var(--accent);
-    font-size: 12px;
-    font-weight: 500;
-    margin-bottom: 18px;
-    position: relative;
-}
-.hero-chip .dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--green);
-    animation: blink 2s infinite;
-}
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
 .hero h2 {
     font-size: 34px;
     font-weight: 800;
@@ -322,6 +273,63 @@ a { text-decoration: none; color: inherit; }
 
 .tool-card.hidden { display: none; }
 
+/* ─── Filter Row ─── */
+.filter-row {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+.filter-btn {
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.filter-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.filter-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+/* ─── Changelog ─── */
+.changelog {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px 32px;
+}
+.changelog h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--text-secondary);
+}
+.changelog-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+.changelog-date {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.changelog-text {
+    color: var(--text-secondary);
+}
+
 /* ─── Empty State ─── */
 .empty {
     text-align: center;
@@ -395,7 +403,6 @@ a { text-decoration: none; color: inherit; }
 </header>
 
 <section class="hero">
-    <div class="hero-chip"><span class="dot"></span> 全部免费在线使用</div>
     <h2>你的 <em>万能工具箱</em></h2>
     <p>视频解析、图片处理、格式转换……日常工作所需的一站式工具集合</p>
     <div class="hero-search">
@@ -404,13 +411,36 @@ a { text-decoration: none; color: inherit; }
     </div>
 </section>
 
+<section class="changelog">
+    <h3>📢 最近更新</h3>
+
+    <div class="changelog-item">
+        <span class="changelog-date">2026-06-05</span>
+        <span class="changelog-text">项目重构与性能的优化</span>
+    </div>
+     <div class="changelog-item">
+        <span class="changelog-date">2026-05-30</span>
+        <span class="changelog-text">V2.0 发布：AI 智能抠图、溶图合成工具</span>
+    </div>
+    <div class="changelog-item">
+        <span class="changelog-date">2026-05-28</span>
+        <span class="changelog-text">新增视频链接下载</span>
+    </div>
+   
+</section>
+
 <section class="tools-wrap">
     <div class="tools-head">
         <h3>🧰 全部工具</h3>
-        <span class="count" id="countLabel">4 个工具</span>
+        <span class="count" id="countLabel">5 个工具</span>
+    </div>
+    <div class="filter-row">
+        <button class="filter-btn active" data-filter="all">全部</button>
+        <button class="filter-btn" data-filter="video">视频工具</button>
+        <button class="filter-btn" data-filter="image">图片工具</button>
     </div>
     <div class="tool-grid" id="toolGrid">
-        <a class="tool-card" href="video-tool/" data-color="blue" data-kw="视频 解析 下载 抖音 bilibili 小红书 tiktok youtube 快手 微博 西瓜 视频号 剪映">
+        <a class="tool-card" href="video-tool/" data-color="blue" data-category="video" data-kw="视频 解析 下载 抖音 bilibili 小红书 tiktok youtube 快手 微博 西瓜 视频号 剪映">
             <div class="card-head">
                 <div class="card-icon" style="background:rgba(59,130,246,0.12)">🎬</div>
                 <div class="card-meta">
@@ -427,7 +457,7 @@ a { text-decoration: none; color: inherit; }
                 <span class="tag tag-blue">YouTube</span>
             </div>
         </a>
-        <a class="tool-card" href="image-tool/" data-color="green" data-kw="图片 压缩 裁剪 批量处理 JPG PNG WebP 社媒预设 裁切 批量 格式转换">
+        <a class="tool-card" href="image-tool/" data-color="green" data-category="image" data-kw="图片 压缩 裁剪 批量处理 JPG PNG WebP 社媒预设 裁切 批量 格式转换">
             <div class="card-head">
                 <div class="card-icon" style="background:rgba(16,185,129,0.12)">🖼️</div>
                 <div class="card-meta">
@@ -443,7 +473,7 @@ a { text-decoration: none; color: inherit; }
                 <span class="tag tag-green">社媒预设</span>
             </div>
         </a>
-        <a class="tool-card" href="bg-remover/" data-color="purple" data-kw="抠图 去背景 去除背景 透明 PNG 抠像 背景移除 AI 抠图工具">
+        <a class="tool-card" href="bg-remover/" data-color="purple" data-category="image" data-kw="抠图 去背景 去除背景 透明 PNG 抠像 背景移除 AI 抠图工具">
             <div class="card-head">
                 <div class="card-icon" style="background:rgba(139,92,246,0.12)">✂️</div>
                 <div class="card-meta">
@@ -458,7 +488,7 @@ a { text-decoration: none; color: inherit; }
                 <span class="tag tag-purple">透明背景</span>
             </div>
         </a>
-        <a class="tool-card" href="image-composite/" data-color="orange" data-kw="溶图 合成 图片合成 产品图 电商 背景图 模板 批量合成">
+        <a class="tool-card" href="image-composite/" data-color="orange" data-category="image" data-kw="溶图 合成 图片合成 产品图 电商 背景图 模板 批量合成">
             <div class="card-head">
                 <div class="card-icon" style="background:rgba(249,115,22,0.12)">🎨</div>
                 <div class="card-meta">
@@ -471,6 +501,21 @@ a { text-decoration: none; color: inherit; }
                 <span class="tag tag-orange">底图合成</span>
                 <span class="tag tag-orange">模板布局</span>
                 <span class="tag tag-orange">批量导出</span>
+            </div>
+        </a>
+        <a class="tool-card" href="text-remover/" data-color="pink" data-category="image" data-kw="去文字 文字去除 OCR 水印 文字移除 图片文字 文字消除 去水印 智能去文字">
+            <div class="card-head">
+                <div class="card-icon" style="background:rgba(236,72,153,0.12)">T</div>
+                <div class="card-meta">
+                    <h4>智能去文字</h4>
+                    <span class="badge">AI 文字去除</span>
+                </div>
+            </div>
+            <div class="card-body">自动识别图片中的文字并智能去除，基于 OCR + 图像修复技术，还原干净背景。</div>
+            <div class="card-foot">
+                <span class="tag tag-pink">文字检测</span>
+                <span class="tag tag-pink">智能修复</span>
+                <span class="tag tag-pink">批量处理</span>
             </div>
         </a>
     </div>
@@ -487,6 +532,7 @@ a { text-decoration: none; color: inherit; }
         <a href="image-tool/">🖼️ 图片处理</a>
         <a href="bg-remover/">✂️ 智能抠图</a>
         <a href="image-composite/">🎨 溶图合成</a>
+        <a href="text-remover/">T 去文字</a>
     </div>
 </section>
 
@@ -505,22 +551,42 @@ function setTheme(t) {
 setTheme(localStorage.getItem('theme') || 'light');
 btn.onclick = () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
 
-// Search
+// Search & Filter
 const input = document.getElementById('searchInput');
 const cards = document.querySelectorAll('.tool-card');
 const empty = document.getElementById('emptyState');
 const countLabel = document.getElementById('countLabel');
-input.addEventListener('input', () => {
+const filterBtns = document.querySelectorAll('.filter-btn');
+let _searchTimer = null;
+let _activeCategory = 'all';
+
+function applyFilters() {
     const q = input.value.trim().toLowerCase();
     let n = 0;
     cards.forEach(c => {
         const kw = (c.dataset.kw || '') + ' ' + c.querySelector('h4').textContent + ' ' + c.querySelector('.card-body').textContent;
-        const show = !q || kw.toLowerCase().includes(q);
+        const matchSearch = !q || kw.toLowerCase().includes(q);
+        const matchCategory = _activeCategory === 'all' || c.dataset.category === _activeCategory;
+        const show = matchSearch && matchCategory;
         c.classList.toggle('hidden', !show);
         if (show) n++;
     });
     empty.classList.toggle('show', n === 0);
-    countLabel.textContent = q ? n + ' 个结果' : cards.length + ' 个工具';
+    countLabel.textContent = q || _activeCategory !== 'all' ? n + ' 个结果' : cards.length + ' 个工具';
+}
+
+input.addEventListener('input', () => {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(applyFilters, 150);
+});
+
+filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        filterBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        _activeCategory = btn.dataset.filter;
+        applyFilters();
+    });
 });
 </script>
 </body>

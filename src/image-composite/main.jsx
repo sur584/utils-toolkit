@@ -1,0 +1,891 @@
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import ReactDOM from 'react-dom/client';
+import { fmt, ext, isImg, uid, showToast as toast } from '../shared/utils.js';
+import { Upload, Download, X, Trash, Plus } from '../shared/icons.jsx';
+import { Btn, UploadZone, Divider } from '../shared/components.jsx';
+
+// ==================== 全局状态 ====================
+let _bg=null;
+let _products=[];
+let _placements={};
+let _selectedId=null;
+let _canvasZoom=1;
+let _showGrid=false;
+let _showExportDialog=false;
+let _showPreview=false;
+let _savedTemplate=null; // {productId: {x, y, scale, rotation}} 每个产品的独立位置
+let _exportConfig={format:'png',quality:95,size:'original',prefix:'合成图'};
+let _batchMode=false; // 批量套模板选择模式
+let _selectedIds=new Set(); // 批量模式下选中的产品ID
+let _fillMethod='fill'; // 填充方法: fill|fitWidth|fitHeight|fitBoth
+let _ls=new Set();
+const sub=fn=>{_ls.add(fn);return()=>_ls.delete(fn)};
+const notify=()=>_ls.forEach(fn=>fn());
+const useStore=()=>{const[,t]=useState(0);useEffect(()=>{const u=sub(()=>t(x=>x+1));return u},[]);return{bg:_bg,products:_products,placements:_placements,selectedId:_selectedId,zoom:_canvasZoom,showGrid:_showGrid,showExportDialog:_showExportDialog,showPreview:_showPreview,savedTemplate:_savedTemplate,exportConfig:_exportConfig,batchMode:_batchMode,selectedIds:_selectedIds,fillMethod:_fillMethod}};
+
+// ==================== 撤销/重做 ====================
+const _undoStack=[];
+const _redoStack=[];
+const MAX_UNDO=50;
+const pushUndoSnapshot=()=>{_undoStack.push(JSON.stringify(_placements));if(_undoStack.length>MAX_UNDO)_undoStack.shift();_redoStack.length=0};
+const undo=()=>{if(!_undoStack.length)return;_redoStack.push(JSON.stringify(_placements));const prev=JSON.parse(_undoStack.pop());Object.keys(_placements).forEach(k=>delete _placements[k]);Object.assign(_placements,prev);notify();scheduleCanvasRender();toast('已撤销')};
+const redo=()=>{if(!_redoStack.length)return;_undoStack.push(JSON.stringify(_placements));const next=JSON.parse(_redoStack.pop());Object.keys(_placements).forEach(k=>delete _placements[k]);Object.assign(_placements,next);notify();scheduleCanvasRender();toast('已重做')};
+
+
+// ==================== 新手引导 ====================
+const _showOnboarding=!localStorage.getItem('ic_onboarded');
+
+// ==================== Canvas 渲染（独立于 React） ====================
+let _rafId=0;
+const scheduleCanvasRender=()=>{if(!_rafId)_rafId=requestAnimationFrame(()=>{_rafId=0;renderCanvas()})};
+const renderCanvas=()=>{
+  const canvas=document.getElementById('compositeCanvas');
+  if(!canvas||!_bg)return;
+  const ctx=canvas.getContext('2d');
+  const bgW=_bg.w,bgH=_bg.h,zoom=_canvasZoom;
+  canvas.width=bgW;canvas.height=bgH;
+  canvas.style.width=(bgW*zoom)+'px';canvas.style.height=(bgH*zoom)+'px';
+  ctx.clearRect(0,0,bgW,bgH);
+  ctx.drawImage(_bg.img,0,0,bgW,bgH);
+  if(_showGrid){
+    ctx.save();ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=1;ctx.setLineDash([6,4]);
+    [1/3,2/3].forEach(f=>{ctx.beginPath();ctx.moveTo(bgW*f,0);ctx.lineTo(bgW*f,bgH);ctx.stroke();ctx.beginPath();ctx.moveTo(0,bgH*f);ctx.lineTo(bgW,bgH*f);ctx.stroke()});
+    ctx.strokeStyle='rgba(255,255,255,0.6)';
+    ctx.beginPath();ctx.moveTo(bgW/2,0);ctx.lineTo(bgW/2,bgH);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(0,bgH/2);ctx.lineTo(bgW,bgH/2);ctx.stroke();
+    ctx.restore();
+  }
+  // 只绘制选中的产品（单产品模式）
+  const drawId=_selectedId||_products.find(p=>p.img&&_placements[p.id])?.id;
+  if(drawId){
+    const p=_products.find(x=>x.id===drawId);
+    const pl=p&&_placements[p.id];
+    if(p&&pl&&p.img){
+      ctx.save();ctx.translate(pl.x,pl.y);ctx.rotate(pl.rotation*Math.PI/180);ctx.scale(pl.scale,pl.scale);
+      ctx.drawImage(p.img,-p.w/2,-p.h/2);ctx.restore();
+      // 选中框
+      ctx.save();ctx.translate(pl.x,pl.y);ctx.rotate(pl.rotation*Math.PI/180);
+      const hw=p.w*pl.scale/2,hh=p.h*pl.scale/2;
+      ctx.strokeStyle='rgba(59,130,246,0.9)';ctx.lineWidth=2/pl.scale;ctx.setLineDash([6/pl.scale,4/pl.scale]);
+      ctx.strokeRect(-hw,-hh,hw*2,hh*2);
+      ctx.setLineDash([]);
+      const hs=6/pl.scale;
+      ctx.fillStyle='#3b82f6';
+      [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].forEach(([cx,cy])=>{ctx.beginPath();ctx.arc(cx,cy,hs,0,Math.PI*2);ctx.fill()});
+      ctx.strokeStyle='rgba(59,130,246,0.9)';ctx.lineWidth=2/pl.scale;
+      ctx.beginPath();ctx.moveTo(0,-hh);ctx.lineTo(0,-hh-20/pl.scale);ctx.stroke();
+      ctx.fillStyle='#3b82f6';ctx.beginPath();ctx.arc(0,-hh-20/pl.scale,hs*1.2,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+    }
+  }
+};
+
+// ==================== Store 操作 ====================
+let _placeOffset=0;
+const setBg=file=>{
+  if(_bg){URL.revokeObjectURL(_bg.thumbUrl)}
+  const img=new Image();
+  const thumbUrl=URL.createObjectURL(file);
+  img.onload=()=>{
+    _bg={file,img,w:img.naturalWidth,h:img.naturalHeight,thumbUrl};
+    _placeOffset=0;
+    notify();scheduleCanvasRender();
+  };
+  img.src=thumbUrl;
+};
+const removeBg=()=>{if(_bg){URL.revokeObjectURL(_bg.thumbUrl);_bg=null;notify();scheduleCanvasRender()}};
+
+// 计算单张产品图的默认放置位置（居中，缩放适配）
+const calcDefaultPlacement=(product)=>{
+  if(!_bg)return{x:0,y:0,scale:0.2,rotation:0};
+  const s=Math.min(_bg.w*0.25/product.w,_bg.h*0.25/product.h);
+  return{x:_bg.w/2,y:_bg.h/2,scale:s,rotation:0};
+};
+
+// 上传产品图 → 只进侧边栏，不放画布
+const addProducts=files=>{
+  const v=Array.from(files).filter(isImg);if(!v.length)return;
+  v.forEach(f=>{
+    const thumbUrl=URL.createObjectURL(f);
+    const img=new Image();
+    const item={id:uid(),file:f,name:f.name,thumbUrl,img:null,originalImg:null,removedBg:false,w:0,h:0};
+    img.onload=()=>{
+      item.img=img;item.w=img.naturalWidth;item.h=img.naturalHeight;
+      notify();
+    };
+    img.src=thumbUrl;
+    _products.push(item);
+  });
+  notify();
+};
+const removeProduct=id=>{
+  const p=_products.find(x=>x.id===id);
+  if(p){URL.revokeObjectURL(p.thumbUrl);if(p.img)p.img.src=''}
+  _products=_products.filter(x=>x.id!==id);
+  delete _placements[id];
+  if(_selectedId===id)_selectedId=null;
+  notify();scheduleCanvasRender();
+};
+const clearProducts=()=>{
+  _products.forEach(p=>{URL.revokeObjectURL(p.thumbUrl);if(p.img)p.img.src=''});
+  _products=[];_placements={};_selectedId=null;_placeOffset=0;
+  notify();scheduleCanvasRender();
+};
+const selectProduct=id=>{_selectedId=id;notify();scheduleCanvasRender()};
+// 拖拽期间直接更新 placement，不触发 React 重渲染
+const updatePlacementFast=(id,props)=>{_placements[id]={..._placements[id],...props};scheduleCanvasRender()};
+// 拖拽结束后触发一次 React 同步
+const updatePlacement=(id,props)=>{pushUndoSnapshot();_placements[id]={..._placements[id],...props};notify();scheduleCanvasRender()};
+const duplicateProduct=id=>{
+  pushUndoSnapshot();
+  const src=_products.find(x=>x.id===id);if(!src||!src.img)return;
+  const newId=uid();
+  const item={...src,id:newId,name:src.name+' 副本',thumbUrl:URL.createObjectURL(src.file),img:src.img,w:src.w,h:src.h};
+  _products.push(item);
+  const pl=_placements[id];
+  if(pl)_placements[newId]={...pl,x:pl.x+30,y:pl.y+30};
+  _selectedId=newId;
+  notify();scheduleCanvasRender();
+};
+
+// === 核心交互：点击侧边栏产品图 → 放到画布上 / 选中 ===
+const placeOrSelectProduct=id=>{
+  const p=_products.find(x=>x.id===id);if(!p||!p.img)return;
+  if(_placements[id]){
+    _selectedId=id;
+  }else{
+    pushUndoSnapshot();
+    _placements[id]=calcDefaultPlacement(p);
+    _selectedId=id;
+    _placeOffset++;
+  }
+  notify();scheduleCanvasRender();
+};
+// 从画布移除（侧边栏仍保留）
+const removeFromCanvas=id=>{
+  pushUndoSnapshot();
+  delete _placements[id];
+  if(_selectedId===id)_selectedId=null;
+  notify();scheduleCanvasRender();
+};
+
+// ==================== 自动抠图 ====================
+const removeBgForProduct=async(id)=>{
+  const p=_products.find(x=>x.id===id);
+  if(!p||!p.img)return;
+  toast('正在抠图...','info');
+  try{
+    const canvas=document.createElement('canvas');
+    canvas.width=p.w;canvas.height=p.h;
+    canvas.getContext('2d').drawImage(p.img,0,0);
+    const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));
+    const fd=new FormData();
+    fd.append('file',blob,p.name);
+    fd.append('model','isnet-general-use');
+    fd.append('quality','fast');
+    const res=await fetch('/api/bg-remove',{method:'POST',body:fd});
+    if(!res.ok)throw new Error('抠图请求失败');
+    const resultBlob=await res.blob();
+    const url=URL.createObjectURL(resultBlob);
+    const img=new Image();
+    img.onload=()=>{
+      if(!p.originalImg)p.originalImg=p.img;
+      p.img=img;p.w=img.naturalWidth;p.h=img.naturalHeight;
+      p.removedBg=true;
+      // 如果已放置，用当前位置重新计算缩放以适配新尺寸
+      if(_placements[id]){
+        const pl=_placements[id];
+        const s=Math.min(_bg.w*0.25/p.w,_bg.h*0.25/p.h);
+        // 保持用户设置的缩放比例
+      }
+      notify();scheduleCanvasRender();
+      toast('抠图完成');
+    };
+    img.src=url;
+  }catch(e){
+    console.error('抠图失败',e);
+    toast('抠图失败：'+e.message,'err');
+  }
+};
+const restoreProductBg=id=>{
+  const p=_products.find(x=>x.id===id);
+  if(!p||!p.originalImg)return;
+  p.img=p.originalImg;p.w=p.img.naturalWidth;p.h=p.img.naturalHeight;
+  p.originalImg=null;p.removedBg=false;
+  notify();scheduleCanvasRender();
+  toast('已还原原图');
+};
+// 批量抠图：对选中的产品或所有产品进行抠图
+const batchRemoveBg=async(ids)=>{
+  const targets=ids?_products.filter(p=>ids.has(p.id)&&p.img):_products.filter(p=>p.img);
+  if(!targets.length)return toast('没有可抠图的产品','err');
+  toast(`正在批量抠图（${targets.length} 张）...`,'info');
+  let done=0;
+  for(const p of targets){
+    try{
+      const canvas=document.createElement('canvas');
+      canvas.width=p.w;canvas.height=p.h;
+      canvas.getContext('2d').drawImage(p.img,0,0);
+      const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));
+      const fd=new FormData();
+      fd.append('file',blob,p.name);
+      fd.append('model','isnet-general-use');
+      fd.append('quality','fast');
+      const res=await fetch('/api/bg-remove',{method:'POST',body:fd});
+      if(!res.ok)continue;
+      const resultBlob=await res.blob();
+      const url=URL.createObjectURL(resultBlob);
+      const img=new Image();
+      await new Promise((resolve)=>{
+        img.onload=()=>{
+          if(!p.originalImg)p.originalImg=p.img;
+          p.img=img;p.w=img.naturalWidth;p.h=img.naturalHeight;
+          p.removedBg=true;
+          resolve();
+        };
+        img.src=url;
+      });
+      done++;
+    }catch(e){console.error('抠图失败',p.name,e)}
+  }
+  notify();scheduleCanvasRender();
+  toast(`批量抠图完成：${done}/${targets.length}`,'ok');
+};
+
+// ==================== 模板操作 ====================
+// 保存当前选中产品的位置，进入批量选择模式
+const saveTemplate=()=>{
+  if(!_selectedId||!_placements[_selectedId])return toast('请先选中并放置一个产品图','err');
+  _savedTemplate={[_selectedId]:{..._placements[_selectedId]}};
+  _batchMode=true;
+  _selectedIds=new Set();
+  // 默认选中所有未放置的产品（方便用户一键套用）
+  _products.forEach(p=>{if(p.img&&!_placements[p.id])_selectedIds.add(p.id)});
+  notify();
+  toast('模板已保存，请选择要套用的产品图','ok');
+};
+// 根据填充方法计算产品在模板区域内的缩放
+const calcFillScale=(product,templatePl)=>{
+  if(!_bg||!product)return templatePl.scale;
+  // 模板产品的原始尺寸（未缩放时）
+  const srcProduct=_products.find(p=>_placements[p.id]&&p.id===Object.keys(_savedTemplate)[0]);
+  if(!srcProduct)return templatePl.scale;
+  // 模板区域的像素尺寸
+  const areaW=srcProduct.w*templatePl.scale;
+  const areaH=srcProduct.h*templatePl.scale;
+  const pw=product.w,ph=product.h;
+  switch(_fillMethod){
+    case'fill':{const s=Math.max(areaW/pw,areaH/ph);return s}
+    case'fitWidth':{return areaW/pw}
+    case'fitHeight':{return areaH/ph}
+    case'fitBoth':{return Math.min(areaW/pw,areaH/ph)}
+    default:return templatePl.scale;
+  }
+};
+// 批量应用模板到选中的产品
+const applyTemplateToSelected=()=>{
+  if(!_savedTemplate)return toast('请先保存模板','err');
+  const templatePlacement=Object.values(_savedTemplate)[0];
+  let count=0;
+  _selectedIds.forEach(id=>{
+    const p=_products.find(x=>x.id===id);
+    if(p&&p.img){
+      const newScale=calcFillScale(p,templatePlacement);
+      _placements[id]={...templatePlacement,scale:newScale};
+      count++;
+    }
+  });
+  if(!count)return toast('请先选择要套用的产品图','err');
+  _savedTemplate={};
+  _products.forEach(p=>{if(_placements[p.id])_savedTemplate[p.id]={..._placements[p.id]}});
+  _batchMode=false;
+  _selectedIds=new Set();
+  _selectedId=_products.find(p=>_placements[p.id])?.id||null;
+  notify();scheduleCanvasRender();
+  toast(`已将模板应用到 ${count} 个产品`,'ok');
+};
+// 取消批量模式
+const cancelBatchMode=()=>{_batchMode=false;_selectedIds=new Set();notify()};
+// 清除模板
+const clearTemplate=()=>{_savedTemplate=null;_batchMode=false;_selectedIds=new Set();notify()};
+
+// ==================== 导出函数 ====================
+// 用指定位置合成单张产品图
+const exportCompositeWithTemplate=async(product,placement)=>{
+  if(!_bg||!product||!product.img||!placement)return null;
+  const t=placement;
+  let c=document.createElement('canvas');c.width=_bg.w;c.height=_bg.h;
+  const ctx=c.getContext('2d');ctx.drawImage(_bg.img,0,0);
+  ctx.save();ctx.translate(t.x,t.y);ctx.rotate(t.rotation*Math.PI/180);ctx.scale(t.scale,t.scale);
+  ctx.drawImage(product.img,-product.w/2,-product.h/2);ctx.restore();
+  let outW=_bg.w,outH=_bg.h;
+  if(_exportConfig.size==='1080'){const r=1080/_bg.w;outW=1080;outH=Math.round(_bg.h*r)}
+  else if(_exportConfig.size==='1500'){const r=1500/_bg.w;outW=1500;outH=Math.round(_bg.h*r)}
+  if(outW!==_bg.w){const c2=document.createElement('canvas');c2.width=outW;c2.height=outH;c2.getContext('2d').drawImage(c,0,0,outW,outH);c=c2}
+  const mime=_exportConfig.format==='jpg'?'image/jpeg':_exportConfig.format==='webp'?'image/webp':'image/png';
+  return new Promise(r=>c.toBlob(r,mime,_exportConfig.quality/100));
+};
+// 预览用：生成单张合成图的 Blob URL
+const previewComposite=async(product,placement)=>{
+  const blob=await exportCompositeWithTemplate(product,placement);
+  if(blob)return URL.createObjectURL(blob);
+  return null;
+};
+// 批量导出：每个产品用各自的位置参数
+const batchExport=async()=>{
+  if(!_bg)return toast('请先上传底图','err');
+  if(!_savedTemplate)return toast('请先点击「批量套模板」保存位置','err');
+  const entries=Object.entries(_savedTemplate);
+  if(!entries.length)return toast('没有已保存的产品位置','err');
+  try{
+    toast('正在生成 '+entries.length+' 张合成图...','info');
+    const zip=new JSZip();
+    for(let i=0;i<entries.length;i++){
+      const[id,placement]=entries[i];
+      const product=_products.find(p=>p.id===id);
+      if(!product)continue;
+      const blob=await exportCompositeWithTemplate(product,placement);
+      if(blob){const name=`${_exportConfig.prefix}_${String(i+1).padStart(2,'0')}.${_exportConfig.format}`;zip.file(name,blob)}
+    }
+    const zipBlob=await zip.generateAsync({type:'blob'});
+    saveAs(zipBlob,`${_exportConfig.prefix}.zip`);
+    toast('已下载 '+entries.length+' 张合成图');
+  }catch(e){console.error('导出失败',e);toast('导出失败：'+e.message,'err')}
+};
+
+// ==================== 图标（工具特有） ====================
+const I={
+  image:()=><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>,
+  eye:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+  grid:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>,
+  template:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>,
+  zoomIn:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>,
+  zoomOut:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>,
+  fit:()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>,
+  copy:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>,
+  wand:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M15 9h.01M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5"/></svg>,
+  undo:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>,
+};
+
+// ==================== UI 组件（Btn, Divider, UploadZone 从 shared 导入） ====================
+
+// ==================== 侧边栏 ====================
+const BgSection=()=>{
+  const{bg}=useStore();
+  const ref=useRef();
+  return<div className="px-3 pt-3 pb-2 border-b border-gray-100">
+    <div className="text-xs font-medium text-gray-500 mb-2">底图</div>
+    {bg?(
+      <div className="relative group">
+        <img src={bg.thumbUrl} loading="lazy" className="w-full h-20 object-contain rounded-lg bg-gray-50" alt="底图"/>
+        <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={()=>ref.current?.click()} className="p-1 bg-white/90 rounded shadow hover:bg-white"><I.image/></button>
+          <button onClick={removeBg} className="p-1 bg-white/90 rounded shadow hover:bg-red-50 text-red-500"><X/></button>
+        </div>
+        <div className="text-xs text-gray-400 mt-1">{bg.w} x {bg.h}</div>
+        <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e=>{if(e.target.files[0])setBg(e.target.files[0])}}/>
+      </div>
+    ):(
+      <UploadZone theme="orange" onFiles={files=>setBg(files[0])}/>
+    )}
+  </div>;
+};
+const ProductItem=({p})=>{
+  const{selectedId,placements,batchMode,selectedIds}=useStore();
+  const active=selectedId===p.id;
+  const onCanvas=!!placements[p.id];
+  const batchSelected=selectedIds.has(p.id);
+  const toggleBatchSelect=e=>{
+    e.stopPropagation();
+    if(batchSelected)selectedIds.delete(p.id);else selectedIds.add(p.id);
+    notify();
+  };
+  // 批量选择模式
+  if(batchMode){
+    return<div onClick={toggleBatchSelect} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${batchSelected?'bg-orange-50 ring-1 ring-orange-300':'hover:bg-gray-50'}`}>
+      <div className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${batchSelected?'border-orange-500 bg-orange-500':'border-gray-300'}`}>
+        {batchSelected&&<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+      </div>
+      <div className="relative flex-shrink-0">
+        <img src={p.thumbUrl} loading="lazy" className="w-10 h-10 object-contain rounded bg-gray-50" alt=""/>
+        {p.removedBg&&<div className="absolute -bottom-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border border-white" title="已抠图"/>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs text-gray-700 truncate">{p.name}</div>
+        <div className="text-xs text-gray-400">{p.w}x{p.h}{onCanvas&&' · 已放置'}{p.removedBg&&' · 已抠图'}</div>
+      </div>
+    </div>;
+  }
+  // 正常模式
+  return<div onClick={()=>placeOrSelectProduct(p.id)} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${active?'bg-orange-50 ring-1 ring-orange-300':'hover:bg-gray-50'}`}>
+    <div className="relative flex-shrink-0">
+      <img src={p.thumbUrl} className="w-10 h-10 object-contain rounded bg-gray-50" alt=""/>
+      {onCanvas&&<div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border border-white"/>}
+      {p.removedBg&&<div className="absolute -bottom-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border border-white" title="已抠图"/>}
+    </div>
+    <div className="flex-1 min-w-0">
+      <div className="text-xs text-gray-700 truncate">{p.name}</div>
+      <div className="text-xs text-gray-400">{p.w}x{p.h}{onCanvas&&' · 已放置'}{p.removedBg&&' · 已抠图'}</div>
+    </div>
+    <div className="flex gap-0.5 flex-shrink-0">
+      {p.removedBg?<button onClick={e=>{e.stopPropagation();restoreProductBg(p.id)}} className="p-1 text-blue-500 hover:text-blue-600 rounded" title="还原原图"><I.undo/></button>
+        :<button onClick={e=>{e.stopPropagation();removeBgForProduct(p.id)}} className="p-1 text-gray-400 hover:text-purple-500 rounded" title="自动抠图"><I.wand/></button>}
+      {onCanvas&&<button onClick={e=>{e.stopPropagation();removeFromCanvas(p.id)}} className="p-1 text-gray-400 hover:text-orange-500 rounded" title="从画布移除"><X/></button>}
+      <button onClick={e=>{e.stopPropagation();duplicateProduct(p.id)}} className="p-1 text-gray-400 hover:text-blue-500 rounded"><I.copy/></button>
+      <button onClick={e=>{e.stopPropagation();removeProduct(p.id)}} className="p-1 text-gray-400 hover:text-red-500 rounded"><Trash/></button>
+    </div>
+  </div>;
+};
+const ProductList=()=>{
+  const{products,placements,bg,selectedId,batchMode,selectedIds,fillMethod}=useStore();
+  const[dragOver,setDragOver]=useState(false);
+  const placedCount=products.filter(p=>placements[p.id]).length;
+  const handleDrop=e=>{e.preventDefault();e.stopPropagation();setDragOver(false);const files=Array.from(e.dataTransfer?.files||[]).filter(isImg);if(files.length)addProducts(files)};
+  const handleDragOver=e=>{e.preventDefault();e.stopPropagation();setDragOver(true)};
+  const handleDragLeave=e=>{e.preventDefault();setDragOver(false)};
+  const selectAll=()=>{products.forEach(p=>{if(p.img)selectedIds.add(p.id)});notify()};
+  const deselectAll=()=>{selectedIds.clear();notify()};
+  const fillMethods=[{k:'fill',l:'填充'},{k:'fitWidth',l:'适配宽度'},{k:'fitHeight',l:'适配高度'},{k:'fitBoth',l:'自适配宽高'}];
+  return<div className={`flex-1 flex flex-col min-h-0 px-3 pb-3 transition-colors ${dragOver?'bg-orange-50':''}`}
+    onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
+    {/* 批量模式顶栏 */}
+    {batchMode?(
+      <div className="py-2 border-b border-orange-200">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-medium text-orange-600">批量套模板 — 选择要套用的产品</span>
+          <button onClick={cancelBatchMode} className="text-xs text-gray-400 hover:text-red-500">取消</button>
+        </div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-gray-400">已选 {selectedIds.size} / {products.length}</span>
+          <div className="flex gap-1.5">
+            <button onClick={selectAll} className="px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded transition-colors">全选</button>
+            <button onClick={deselectAll} className="px-2 py-0.5 text-xs font-medium text-gray-500 bg-gray-50 hover:bg-gray-100 rounded transition-colors">全不选</button>
+          </div>
+        </div>
+        <div className="mb-2">
+          <div className="text-xs text-gray-500 mb-1">填充方法</div>
+          <div className="flex gap-1">{fillMethods.map(f=><button key={f.k} onClick={()=>{_fillMethod=f.k;notify()}} className={`flex-1 px-1.5 py-1 text-xs rounded border transition-colors ${fillMethod===f.k?'border-orange-400 bg-orange-50 text-orange-600':'border-gray-200 hover:border-gray-300 text-gray-500'}`}>{f.l}</button>)}</div>
+        </div>
+        <div className="flex gap-1.5">
+          <button onClick={applyTemplateToSelected} disabled={selectedIds.size===0} className="flex-1 px-2 py-1.5 text-xs font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed">应用到选中 ({selectedIds.size})</button>
+          <button onClick={()=>batchRemoveBg(selectedIds)} disabled={selectedIds.size===0} className="px-2 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title="批量抠图">批量抠图</button>
+        </div>
+      </div>
+    ):(
+      <div className="flex items-center justify-between py-2">
+        <span className="text-xs font-medium text-gray-500">产品图 ({products.length}{placedCount>0?` · ${placedCount} 已放置`:''})</span>
+        {products.length>0&&<button onClick={clearProducts} className="text-xs text-gray-400 hover:text-red-500">清空</button>}
+      </div>
+    )}
+    <div className="flex-1 overflow-y-auto space-y-1">
+      {products.length===0&&<div className="flex flex-col items-center justify-center h-full text-gray-400 py-6 pointer-events-none">
+        <div className="mb-2 text-2xl opacity-40">+</div>
+        <div className="text-xs">拖拽或点击下方按钮上传产品图</div>
+      </div>}
+      {products.map(p=><ProductItem key={p.id} p={p}/>)}
+    </div>
+    <div className="pt-2">
+      {batchMode?(
+        <div className="flex gap-1.5">
+          <button onClick={()=>batchRemoveBg(null)} className="flex-1 px-2 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">全部抠图</button>
+          <UploadZone isButton theme="orange" onFiles={addProducts}/>
+        </div>
+      ):(
+        <UploadZone isButton theme="orange" onFiles={addProducts}/>
+      )}
+    </div>
+  </div>;
+};
+
+// ==================== 画布交互（高性能：拖拽不触发 React） ====================
+const CanvasArea=()=>{
+  const{bg,products,placements,selectedId,zoom,showGrid}=useStore();
+  const containerRef=useRef();
+  const overlayRef=useRef();
+  const dragRef=useRef({active:false,action:null,startX:0,startY:0,startPl:null});
+
+  useEffect(()=>{
+    if(!containerRef.current)return;
+    const obs=new ResizeObserver(()=>scheduleCanvasRender());
+    obs.observe(containerRef.current);return()=>obs.disconnect();
+  },[]);
+
+  useEffect(()=>{scheduleCanvasRender()},[bg,products,placements,selectedId,zoom,showGrid]);
+
+  useEffect(()=>{
+    if(!_bg)return;
+    const el=containerRef.current;if(!el)return;
+    const cw=el.clientWidth-40,ch=el.clientHeight-40;
+    const z=Math.min(cw/_bg.w,ch/_bg.h,1);
+    _canvasZoom=z;notify();scheduleCanvasRender();
+  },[bg]);
+
+  const toCanvasCoords=useCallback((clientX,clientY)=>{
+    const rect=overlayRef.current?.getBoundingClientRect();if(!rect)return{x:0,y:0};
+    return{x:(clientX-rect.left)/zoom,y:(clientY-rect.top)/zoom};
+  },[zoom]);
+
+  const hitTest=useCallback((cx,cy)=>{
+    // 只测试当前选中的产品
+    if(!_selectedId)return null;
+    const p=products.find(x=>x.id===_selectedId);
+    const pl=p&&placements[p.id];
+    if(!p||!pl||!p.img)return null;
+    const hw=p.w*pl.scale/2,hh=p.h*pl.scale/2;
+    const dx=cx-pl.x,dy=cy-pl.y;
+    const cos=Math.cos(-pl.rotation*Math.PI/180),sin=Math.sin(-pl.rotation*Math.PI/180);
+    const rx=dx*cos-dy*sin,ry=dx*sin+dy*cos;
+    if(Math.abs(rx)<=hw&&Math.abs(ry)<=hh)return{product:p,placement:pl};
+    return null;
+  },[products,placements,selectedId]);
+
+  const handlePointerDown=useCallback(e=>{
+    if(e.button!==0)return;
+    const pos=toCanvasCoords(e.clientX,e.clientY);
+    const hit=hitTest(pos.x,pos.y);
+    if(hit){
+      dragRef.current={active:true,action:'move',startX:pos.x,startY:pos.y,startPl:{...hit.placement}};
+      overlayRef.current?.setPointerCapture(e.pointerId);
+    }else{
+      selectProduct(null);
+    }
+  },[toCanvasCoords,hitTest]);
+
+  const handlePointerMove=useCallback(e=>{
+    const d=dragRef.current;if(!d.active)return;
+    const pos=toCanvasCoords(e.clientX,e.clientY);
+    if(d.action==='move'){
+      const dx=pos.x-d.startX,dy=pos.y-d.startY;
+      updatePlacementFast(selectedId,{x:d.startPl.x+dx,y:d.startPl.y+dy});
+    }
+  },[toCanvasCoords,selectedId]);
+
+  const handlePointerUp=useCallback(e=>{
+    if(dragRef.current.active){
+      dragRef.current={active:false,action:null};
+      notify();
+    }
+    try{overlayRef.current?.releasePointerCapture(e.pointerId)}catch(_){}
+  },[]);
+
+  useEffect(()=>{
+    const el=overlayRef.current;if(!el)return;
+    const onWheel=e=>{e.preventDefault();const delta=e.deltaY>0?-0.1:0.1;_canvasZoom=Math.max(0.1,Math.min(5,_canvasZoom+delta));notify();scheduleCanvasRender()};
+    el.addEventListener('wheel',onWheel,{passive:false});
+    return()=>el.removeEventListener('wheel',onWheel);
+  },[]);
+
+  const startScale=useCallback((e)=>{
+    e.stopPropagation();e.preventDefault();
+    const pl=placements[selectedId];if(!pl)return;
+    const rect=overlayRef.current?.getBoundingClientRect();if(!rect)return;
+    const cx=rect.left+pl.x*zoom,cy=rect.top+pl.y*zoom;
+    const startDist=Math.hypot(e.clientX-cx,e.clientY-cy);
+    const startScaleVal=pl.scale;
+    const move=ev=>{
+      const dist=Math.hypot(ev.clientX-cx,ev.clientY-cy);
+      updatePlacementFast(selectedId,{scale:Math.max(0.05,Math.min(10,startScaleVal*(dist/startDist)))});
+    };
+    const up=()=>{notify();document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up)};
+    document.addEventListener('pointermove',move);document.addEventListener('pointerup',up);
+  },[selectedId,placements,zoom]);
+
+  const startRotate=useCallback(e=>{
+    e.stopPropagation();e.preventDefault();
+    const pl=placements[selectedId];if(!pl)return;
+    const rect=overlayRef.current?.getBoundingClientRect();if(!rect)return;
+    const cx=rect.left+pl.x*zoom,cy=rect.top+pl.y*zoom;
+    const startAngle=Math.atan2(e.clientY-cy,e.clientX-cx)*180/Math.PI;
+    const startRot=pl.rotation;
+    const move=ev=>{
+      let angle=Math.atan2(ev.clientY-cy,ev.clientX-cx)*180/Math.PI-startAngle+startRot;
+      if(!ev.shiftKey){const step=15;angle=Math.round(angle/step)*step}
+      updatePlacementFast(selectedId,{rotation:angle});
+    };
+    const up=()=>{notify();document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up)};
+    document.addEventListener('pointermove',move);document.addEventListener('pointerup',up);
+  },[selectedId,placements,zoom]);
+
+  useEffect(()=>{
+    const onKey=e=>{
+      if(e.target.tagName==='INPUT')return;
+      if((e.key==='Delete'||e.key==='Backspace')&&selectedId){e.preventDefault();removeProduct(selectedId)}
+      if(e.key==='d'&&(e.ctrlKey||e.metaKey)){e.preventDefault();duplicateProduct(selectedId)}
+      if(e.key==='z'&&(e.ctrlKey||e.metaKey)&&!e.shiftKey){e.preventDefault();undo()}
+      if((e.key==='z'&&(e.ctrlKey||e.metaKey)&&e.shiftKey)||(e.key==='y'&&(e.ctrlKey||e.metaKey))){e.preventDefault();redo()}
+    };
+    document.addEventListener('keydown',onKey);return()=>document.removeEventListener('keydown',onKey);
+  },[selectedId]);
+
+  if(!bg)return<div ref={containerRef} className="flex-1 flex items-center justify-center checkerboard"><div className="text-center text-gray-400"><div className="mb-3"><I.image/></div><div className="text-sm">请先在左侧上传底图</div></div></div>;
+  if(!selectedId&&!Object.keys(placements).length&&products.length)return<div ref={containerRef} className="flex-1 overflow-auto checkerboard flex items-center justify-center p-5"><div className="text-center text-gray-400"><div className="mb-3 text-2xl">+</div><div className="text-sm">在左侧点击产品图将其放置到画布上</div><div className="text-xs mt-1 text-gray-300">每次只显示一个产品，可独立调整位置</div></div></div>;
+
+  const selProduct=selectedId?products.find(x=>x.id===selectedId):null;
+  const selPl=selectedId?placements[selectedId]:null;
+
+  return<div ref={containerRef} className="flex-1 overflow-auto checkerboard flex items-center justify-center p-5">
+    <div className="relative inline-block" style={{width:bg.w*zoom,height:bg.h*zoom}}>
+      <canvas id="compositeCanvas" className="block shadow-lg"/>
+      <div ref={overlayRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} className="absolute inset-0" style={{cursor:selectedId?'move':'default'}}/>
+      {selProduct&&selPl&&(()=>{
+        const hw=selProduct.w*selPl.scale/2*zoom;
+        const hh=selProduct.h*selPl.scale/2*zoom;
+        const cx=selPl.x*zoom,cy=selPl.y*zoom;
+        return<svg className="absolute inset-0 pointer-events-none" style={{width:bg.w*zoom,height:bg.h*zoom}}>
+          <rect x={cx-hw} y={cy-hh} width={hw*2} height={hh*2} fill="none" stroke="rgba(59,130,246,0.8)" strokeWidth="2" strokeDasharray="6 4" transform={`rotate(${selPl.rotation} ${cx} ${cy})`}/>
+          {[[-1,-1],[1,-1],[1,1],[-1,1]].map(([dx,dy],i)=><circle key={i} cx={cx+dx*hw} cy={cy+dy*hh} r={5} fill="#3b82f6" stroke="#fff" strokeWidth="2" style={{cursor:'nwse-resize'}} pointerEvents="auto" onPointerDown={e=>startScale(e)}/>)}
+          <line x1={cx} y1={cy-hh} x2={cx} y2={cy-hh-25} stroke="rgba(59,130,246,0.8)" strokeWidth="2" transform={`rotate(${selPl.rotation} ${cx} ${cy})`}/>
+          <circle cx={cx} cy={cy-hh-25} r={6} fill="#3b82f6" stroke="#fff" strokeWidth="2" transform={`rotate(${selPl.rotation} ${cx} ${cy})`} style={{cursor:'grab'}} pointerEvents="auto" onPointerDown={startRotate}/>
+        </svg>;
+      })()}
+    </div>
+  </div>;
+};
+
+// ==================== 工具栏 ====================
+const Toolbar=()=>{
+  const{zoom,showGrid,products,placements,bg,selectedId,savedTemplate,batchMode}=useStore();
+  const placedCount=products.filter(p=>placements[p.id]).length;
+  const templateCount=savedTemplate?Object.keys(savedTemplate).length:0;
+  return<div className="h-11 px-4 flex items-center gap-3 bg-white border-t border-gray-100 flex-shrink-0 text-sm">
+    <button onClick={()=>{_canvasZoom=Math.max(0.1,zoom-0.1);notify();scheduleCanvasRender()}} className="p-1 hover:bg-gray-100 rounded"><I.zoomOut/></button>
+    <input type="range" min="0.1" max="5" step="0.05" value={zoom} onChange={e=>{_canvasZoom=parseFloat(e.target.value);notify();scheduleCanvasRender()}} className="w-24"/>
+    <button onClick={()=>{_canvasZoom=Math.min(5,zoom+0.1);notify();scheduleCanvasRender()}} className="p-1 hover:bg-gray-100 rounded"><I.zoomIn/></button>
+    <span className="text-xs text-gray-500 w-12 text-center">{Math.round(zoom*100)}%</span>
+    <button onClick={()=>{if(!_bg)return;const c=document.querySelector('.checkerboard')||document.getElementById('compositeCanvas')?.parentElement?.parentElement;if(!c)return;const z=Math.min((c.clientWidth-40)/_bg.w,(c.clientHeight-40)/_bg.h,1);_canvasZoom=z;notify();scheduleCanvasRender()}} className="p-1 hover:bg-gray-100 rounded" title="适应窗口"><I.fit/></button>
+    <div className="w-px h-5 bg-gray-200"/>
+    <div className="flex items-center gap-0.5">
+      <button onClick={undo} disabled={!_undoStack.length} className={`p-1.5 rounded ${_undoStack.length?'hover:bg-gray-100 text-gray-500':'text-gray-300 cursor-not-allowed'}`} title="撤销 (Ctrl+Z)"><I.undo/></button>
+      <button onClick={redo} disabled={!_redoStack.length} className={`p-1.5 rounded ${_redoStack.length?'hover:bg-gray-100 text-gray-500':'text-gray-300 cursor-not-allowed'}`} title="重做 (Ctrl+Shift+Z)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+    </div>
+    <button onClick={()=>{_showGrid=!_showGrid;notify();scheduleCanvasRender()}} className={`p-1.5 rounded flex items-center gap-1 text-xs ${showGrid?'bg-orange-100 text-orange-600':'hover:bg-gray-100 text-gray-500'}`}><I.grid/><span>网格</span></button>
+    {placedCount>0&&!batchMode&&<button onClick={()=>saveTemplate()} className={`px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 transition-colors ${savedTemplate?'bg-green-500 hover:bg-green-600 text-white':'bg-blue-500 hover:bg-blue-600 text-white'}`}><I.template/>{savedTemplate?`模板已保存 (${templateCount})`:'批量套模板'}</button>}
+    {batchMode&&<span className="px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 bg-orange-100 text-orange-600"><I.template/>请选择产品图</span>}
+    {(savedTemplate&&!batchMode)&&<button onClick={()=>clearTemplate()} className="px-2 py-1.5 text-xs text-gray-400 hover:text-red-500 rounded-lg transition-colors">清除</button>}
+    <div className="flex-1"/>
+    {savedTemplate&&<span className="text-xs text-green-600 bg-green-50 px-2.5 py-1 rounded-full mr-2">模板就绪 →</span>}
+    <button onClick={()=>{_showPreview=true;notify()}} disabled={!bg||!placedCount} className={`px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1 transition-all ${placedCount?'bg-white text-orange-600 ring-1 ring-orange-300 hover:bg-orange-50 shadow-sm':'text-gray-600 hover:bg-gray-100'} disabled:opacity-40 disabled:cursor-not-allowed`}><I.eye/>预览</button>
+    <button onClick={()=>{_showExportDialog=true;notify()}} disabled={!bg||!savedTemplate} className={`px-3 py-1.5 text-xs font-medium text-white rounded-lg flex items-center gap-1 transition-all ${savedTemplate?'bg-orange-500 hover:bg-orange-600 shadow-sm':'bg-orange-300 cursor-not-allowed'} disabled:opacity-40 disabled:cursor-not-allowed`}><Download/>导出{savedTemplate?` (${templateCount} 张)`:''}</button>
+  </div>;
+};
+
+// ==================== 预览弹窗 ====================
+const PreviewModal=()=>{
+  const{showPreview,bg,products,placements,savedTemplate}=useStore();
+  const[thumbnails,setThumbnails]=useState([]); // [{url,name}]
+  const[viewIdx,setViewIdx]=useState(null); // 点击查看单张时的索引，null=网格模式
+  const[viewUrl,setViewUrl]=useState(null);
+  const[generating,setGenerating]=useState(false);
+  const thumbRef=useRef([]);
+  const previewList=Object.entries(placements).map(([id,placement])=>{
+    const product=products.find(p=>p.id===id&&p.img);
+    return product?{product,placement}:null;
+  }).filter(Boolean);
+  // 用 JSON 作为稳定的依赖 key
+  const listKey=previewList.map(p=>`${p.product.id}:${p.placement.x.toFixed(0)},${p.placement.y.toFixed(0)},${p.placement.scale.toFixed(2)},${p.placement.rotation.toFixed(0)}`).join('|');
+  // 打开时生成所有缩略图
+  useEffect(()=>{
+    if(!showPreview||!bg||!previewList.length){setThumbnails([]);thumbRef.current=[];return}
+    let cancelled=false;
+    setGenerating(true);
+    setViewIdx(null);setViewUrl(null);
+    // 清理旧缩略图
+    thumbRef.current.forEach(t=>{if(t.url)URL.revokeObjectURL(t.url)});
+    thumbRef.current=[];
+    Promise.all(previewList.map(async(item,i)=>{
+      const url=await previewComposite(item.product,item.placement);
+      return url?{url,name:item.product.name,idx:i}:null;
+    })).then(results=>{
+      if(!cancelled){const list=results.filter(Boolean);thumbRef.current=list;setThumbnails(list);setGenerating(false)}
+    });
+    return()=>{cancelled=true};
+  },[showPreview,bg,listKey]);
+  // 查看单张时生成大图
+  useEffect(()=>{
+    if(viewIdx===null||!previewList[viewIdx]){setViewUrl(null);return}
+    let cancelled=false;
+    const oldUrl=viewUrl;
+    const item=previewList[viewIdx];
+    previewComposite(item.product,item.placement).then(u=>{if(!cancelled){if(oldUrl)URL.revokeObjectURL(oldUrl);setViewUrl(u)}});
+    return()=>{cancelled=true};
+  },[viewIdx,listKey]);
+  if(!showPreview)return null;
+  if(!previewList.length)return<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={()=>{_showPreview=false;notify()}}>
+    <div className="bg-white rounded-2xl shadow-2xl w-80 p-6 text-center" onClick={e=>e.stopPropagation()}>
+      <div className="text-sm text-gray-600 mb-3">请先在画布上放置产品图</div>
+      <Btn onClick={()=>{_showPreview=false;notify()}} variant="ghost" size="sm" className="mx-auto">返回</Btn>
+    </div>
+  </div>;
+  const close=()=>{_showPreview=false;setThumbnails([]);setViewIdx(null);setViewUrl(null);notify()};
+  const downloadItem=async(item,idx)=>{
+    const blob=await exportCompositeWithTemplate(item.product,item.placement);
+    if(blob)saveAs(blob,`${_exportConfig.prefix}_${String(idx+1).padStart(2,'0')}.${_exportConfig.format}`);
+  };
+  // 单张查看模式
+  if(viewIdx!==null){
+    const item=previewList[viewIdx];
+    return<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={close}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-5xl max-h-[90vh] w-full mx-4 flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <button onClick={()=>setViewIdx(null)} className="text-xs text-orange-600 hover:text-orange-700">← 返回网格</button>
+            <span className="font-medium text-sm">{item?.product.name} <span className="text-gray-400 font-normal ml-1">{viewIdx+1}/{previewList.length}</span></span>
+          </div>
+          <button onClick={close} className="p-1 hover:bg-gray-100 rounded"><X/></button>
+        </div>
+        <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-gray-50">
+          {viewUrl?<img src={viewUrl} className="max-w-full max-h-[75vh] object-contain rounded shadow"/>:<div className="text-gray-400">生成中...</div>}
+        </div>
+        <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100">
+          <div className="flex gap-1">
+            <button onClick={()=>setViewIdx(i=>Math.max(0,i-1))} disabled={viewIdx===0} className="px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded disabled:opacity-30">上一张</button>
+            <button onClick={()=>setViewIdx(i=>Math.min(previewList.length-1,i+1))} disabled={viewIdx===previewList.length-1} className="px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded disabled:opacity-30">下一张</button>
+          </div>
+          <div className="flex gap-2">
+            <Btn onClick={()=>downloadItem(item,viewIdx)} variant="ghost" size="sm">下载当前图</Btn>
+            <Btn onClick={()=>{batchExport()}} theme="orange" size="sm">打包下载 ZIP ({previewList.length} 张)</Btn>
+          </div>
+        </div>
+      </div>
+    </div>;
+  }
+  // 网格模式
+  return<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={close}>
+    <div className="bg-white rounded-2xl shadow-2xl max-w-6xl max-h-[90vh] w-full mx-4 flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <span className="font-medium">合成预览 <span className="text-sm text-gray-400 font-normal ml-2">共 {previewList.length} 张</span></span>
+        <button onClick={close} className="p-1 hover:bg-gray-100 rounded"><X/></button>
+      </div>
+      <div className="flex-1 overflow-auto p-4 bg-gray-50">
+        {generating?<div className="flex items-center justify-center h-full text-gray-400">正在生成预览...</div>
+        :<div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          {thumbnails.map((t,i)=><div key={i} onClick={()=>setViewIdx(t.idx)} className="group relative cursor-pointer rounded-lg overflow-hidden bg-white shadow hover:shadow-lg transition-shadow">
+            <img src={t.url} loading="lazy" className="w-full aspect-square object-contain p-1" alt=""/>
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors"/>
+            <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/60 to-transparent">
+              <div className="text-xs text-white truncate">{t.name}</div>
+            </div>
+          </div>)}
+        </div>}
+      </div>
+      <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
+        <Btn onClick={()=>{batchExport()}} theme="orange" size="sm">打包下载 ZIP ({previewList.length} 张)</Btn>
+      </div>
+    </div>
+  </div>;
+};
+
+// ==================== 导出设置弹窗 ====================
+const ExportDialog=()=>{
+  const{showExportDialog,exportConfig,savedTemplate}=useStore();
+  const[exporting,setExporting]=useState(false);
+  if(!showExportDialog)return null;
+  const close=()=>{_showExportDialog=false;notify()};
+  const update=(k,v)=>{_exportConfig={..._exportConfig,[k]:v};notify()};
+  const templateCount=savedTemplate?Object.keys(savedTemplate).length:0;
+  const handleExport=async()=>{setExporting(true);try{await batchExport()}finally{setExporting(false)}};
+  return<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={close}>
+    <div className="bg-white rounded-2xl shadow-2xl w-96 max-h-[85vh] flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <span className="font-medium">导出设置</span>
+        <button onClick={close} className="p-1 hover:bg-gray-100 rounded"><X/></button>
+      </div>
+      <div className="flex-1 overflow-auto p-5 space-y-4">
+        <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">批量导出将为每张产品图生成一张合成图：<br/>每张图 = 底图 + 该产品图（使用各自保存的位置参数）</div>
+        <div>
+          <label className="text-xs font-medium text-gray-500 block mb-1.5">输出格式</label>
+          <div className="flex gap-2">{['png','jpg','webp'].map(f=><button key={f} onClick={()=>update('format',f)} className={`px-3 py-1.5 text-xs rounded-lg border ${exportConfig.format===f?'border-orange-400 bg-orange-50 text-orange-600':'border-gray-200 hover:border-gray-300'}`}>{f.toUpperCase()}</button>)}</div>
+        </div>
+        {exportConfig.format!=='png'&&<div>
+          <label className="text-xs font-medium text-gray-500 block mb-1.5">质量: {exportConfig.quality}%</label>
+          <input type="range" min="1" max="100" value={exportConfig.quality} onChange={e=>update('quality',parseInt(e.target.value))} className="w-full"/>
+        </div>}
+        <div>
+          <label className="text-xs font-medium text-gray-500 block mb-1.5">输出尺寸</label>
+          <div className="flex gap-2 flex-wrap">{[{k:'original',l:'原始'},{k:'1080',l:'1080px'},{k:'1500',l:'1500px'}].map(s=><button key={s.k} onClick={()=>update('size',s.k)} className={`px-3 py-1.5 text-xs rounded-lg border ${exportConfig.size===s.k?'border-orange-400 bg-orange-50 text-orange-600':'border-gray-200 hover:border-gray-300'}`}>{s.l}</button>)}</div>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-500 block mb-1.5">文件名前缀</label>
+          <input type="text" value={exportConfig.prefix} onChange={e=>update('prefix',e.target.value)} className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:border-orange-400 focus:outline-none"/>
+        </div>
+      </div>
+      <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
+        <Btn onClick={close} variant="ghost" size="sm">取消</Btn>
+        <Btn onClick={()=>{close();handleExport()}} disabled={exporting||!savedTemplate} theme="orange" size="sm">{exporting?'导出中...':`导出 ZIP (${templateCount} 张)`}</Btn>
+      </div>
+    </div>
+  </div>;
+};
+
+// ==================== 新手引导浮层 ====================
+const OnboardingOverlay=()=>{
+  const[step,setStep]=useState(0);
+  const[visible,setVisible]=useState(_showOnboarding);
+  if(!visible)return null;
+  const steps=[
+    {title:'上传底图',desc:'点击左侧「上传底图」按钮，选择一张背景图片作为画布基础',icon:'🖼'},
+    {title:'添加产品图',desc:'在「产品图」区域上传需要溶入背景的产品/人物图片',icon:'📦'},
+    {title:'点击放置',desc:'在画布上点击任意位置，将产品图放置到该位置',icon:'👆'},
+    {title:'调整位置',desc:'拖动产品图调整位置，使用滚轮缩放，右侧工具栏微调',icon:'🔄'},
+    {title:'批量套模板',desc:'开启批量模式，保存模板后可一键应用到其他底图',icon:'📋'},
+  ];
+  const cur=steps[step];
+  const close=()=>{setVisible(false);localStorage.setItem('ic_onboarded','1')};
+  const next=()=>{if(step<steps.length-1)setStep(step+1);else close()};
+  return<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={close}>
+    <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 animate-fade-up" onClick={e=>e.stopPropagation()}>
+      <div className="text-center mb-6">
+        <div className="text-4xl mb-3">{cur.icon}</div>
+        <h3 className="text-lg font-bold text-gray-800 mb-2">{cur.title}</h3>
+        <p className="text-sm text-gray-500 leading-relaxed">{cur.desc}</p>
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1.5">
+          {steps.map((_,i)=><div key={i} className={`w-2 h-2 rounded-full transition-colors ${i===step?'bg-orange-500':'bg-gray-200'}`}/>)}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={close} className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors">跳过</button>
+          <button onClick={next} className="px-4 py-1.5 text-xs bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors">
+            {step<steps.length-1?'下一步':'开始使用'}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>;
+};
+
+// ==================== App ====================
+const App=()=>{
+  const[sidebarW,setSidebarW]=useState(300);
+  const appRef=useRef();
+  const handleSidebarDrag=useCallback(x=>{
+    const rect=appRef.current?.getBoundingClientRect();
+    if(rect)setSidebarW(Math.max(200,Math.min(500,x-rect.left)));
+  },[]);
+
+  return<div ref={appRef} className="flex flex-col h-screen">
+    <div className="flex items-center h-12 px-5 bg-white border-b border-gray-100 flex-shrink-0">
+      <a href="../../" className="text-sm text-gray-400 hover:text-gray-600 mr-4 transition-colors">&larr; 工具箱</a>
+      <div className="flex items-center gap-2.5">
+        <div className="w-6 h-6 rounded bg-orange-500 flex items-center justify-center"><I.image/></div>
+        <span className="font-semibold text-sm">溶图</span>
+      </div>
+    </div>
+    <div className="flex flex-1 overflow-hidden">
+      <div style={{width:sidebarW}} className="flex flex-col bg-white border-r border-gray-100 flex-shrink-0 overflow-hidden">
+        <BgSection/>
+        <ProductList/>
+      </div>
+      <Divider theme="orange" onDrag={handleSidebarDrag}/>
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <CanvasArea/>
+        <Toolbar/>
+      </div>
+    </div>
+    <PreviewModal/>
+    <ExportDialog/>
+    <OnboardingOverlay/>
+  </div>;
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);

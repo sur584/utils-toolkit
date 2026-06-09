@@ -38,16 +38,24 @@
 ### 双击运行（推荐，无需任何环境）
 
 1. 双击 `app.bat`
-2. **自动检测并安装 Python**（无需手动安装，会下载便携版 Python 到项目目录）
-3. 自动安装依赖并启动服务
-4. 自动打开浏览器
+2. 自动安装依赖
+3. 首次运行自动构建前端，后续跳过
+4. 启动服务并打开浏览器
 
-> `app.bat` 会自动处理一切：检测 Python → 下载安装 → 安装依赖 → 启动服务。双击即可使用。
+> `app.bat` 会自动处理一切：检测 Python → 安装依赖 → 构建前端 → 启动服务。双击即可使用。
 
 ### 手动启动（已安装 Python 的用户）
 
 ```bash
 python launcher.py
+```
+
+### 重新构建前端 （白屏）
+
+修改了 `src/` 下的前端源码后，双击 `rebuild.bat` 或运行：
+
+```bash
+npx vite build
 ```
 
 ## 访问地址
@@ -70,58 +78,83 @@ python launcher.py
 ```
 utils-toolkit/
 ├── index.html                 # 工具箱主页
-├── app.bat                    # Windows 启动脚本（自动安装 Python + 依赖）
-├── launcher.py                # Python 启动器
+├── app.bat / app.sh           # 一键启动脚本
+├── launcher.py                # Python 启动器（统一依赖管理）
+├── rebuild.bat                # 重新构建前端（修改源码后双击）
+├── vite.config.js             # Vite 构建配置（多页面 + 构建后处理）
+├── tailwind.config.js         # Tailwind CSS 配置
 ├── requirements.txt           # Python 依赖清单
-├── python/                    # 便携版 Python（自动下载，无需手动操作）
 ├── models/                    # AI 模型文件（自动下载）
 ├── .gitignore
+│
+├── src/                       # 前端源码（Vite 构建）
+│   ├── shared/                # 共享模块（消除工具间）
+│   │   ├── icons.jsx          # 共享 SVG 图标组件
+│   │   ├── components.jsx     # 共享 UI 组件（Btn, UploadZone, Divider, EmptyState, ZoomControls）
+│   │   ├── hooks.js           # 共享 hooks（useZoomPan）
+│   │   ├── download.js        # 共享下载辅助函数
+│   │   ├── utils.js           # 共享工具函数
+│   │   └── store.js           # 共享状态管理工厂
+│   ├── bg-remover/main.jsx    # AI 智能抠图
+│   ├── text-remover/main.jsx  # 智能去文字
+│   ├── image-tool/main.jsx    # 图片批处理
+│   └── image-composite/main.jsx # 溶图合成
+│
 ├── backend/                   # 后端服务
-│   ├── main.py                # FastAPI 应用
+│   ├── main.py                # FastAPI 入口（精简版，~100 行）
+│   ├── config.py              # 路径常量、日志配置
+│   ├── deps.py                # 共享依赖、Pydantic 模型
 │   ├── decrypt.py             # 微信视频号解密
-│   ├── parsers/               # 多平台视频解析器
-│   │   ├── __init__.py        # 统一入口
-│   │   ├── _utils.py          # 共用函数
-│   │   ├── douyin.py          # 抖音
-│   │   ├── bilibili.py        # B站
-│   │   └── ...                # 共 10 个平台
-│   └── services/              # V3.0 AI 服务层
-│       ├── model_manager.py   # 模型管理器
-│       ├── image_classifier.py # 图片分类（MobileNetV3）
-│       ├── model_router.py    # 智能模型路由
-│       ├── image_optimizer.py # 图片预处理
-│       ├── post_processor.py  # 边缘优化
-│       ├── task_queue.py      # 并发任务队列
-│       └── disk_cache.py      # 磁盘缓存
-├── tools/
+│   ├── routers/               # 路由模块（从 main.py 拆分）
+│   │   ├── video.py           # 视频解析路由
+│   │   ├── bg_remove.py       # 抠图路由
+│   │   ├── text_remove.py     # 去字路由
+│   │   ├── history.py         # 历史记录路由
+│   │   └── static.py          # 静态文件 + 首页路由
+│   ├── parsers/               # 多平台视频解析器（10 个平台）
+│   └── services/              # 业务服务层
+│       ├── bg_remove_service.py  # 抠图管线服务
+│       ├── download_service.py   # 下载策略服务
+│       ├── model_manager.py      # 模型管理器
+│       ├── image_classifier.py   # 图片分类（MobileNetV3）
+│       ├── model_router.py       # 智能模型路由
+│       ├── image_optimizer.py    # 图片预处理
+│       ├── post_processor.py     # 边缘优化
+│       ├── task_queue.py         # 并发任务队列
+│       └── disk_cache.py         # 磁盘缓存
+│
+├── tools/                     # 构建产物 + 静态前端
 │   ├── libs/                  # 公共前端库
-│   │   ├── tailwind.js
-│   │   ├── react.production.min.js
-│   │   ├── react-dom.production.min.js
-│   │   ├── babel.min.js
-│   │   ├── jszip.min.js
-│   │   └── FileSaver.min.js
-│   ├── video-tool/            # 视频解析下载
-│   │   ├── index.html
-│   │   ├── css/style.css
-│   │   └── js/app.js
-│   ├── image-tool/            # 图片批量处理
-│   │   └── index.html
-│   ├── bg-remover/            # AI 智能抠图
-│   │   └── index.html
-│   └── image-composite/       # 溶图合成
-│       └── index.html
+│   ├── video-tool/            # 视频解析下载（vanilla JS）
+│   ├── image-tool/            # 图片批处理（构建产物）
+│   ├── bg-remover/            # AI 智能抠图（构建产物）
+│   ├── text-remover/          # 智能去文字（构建产物）
+│   └── image-composite/       # 溶图合成（构建产物）
+│
 └── docs/
+    ├── TOOLS_GUIDE.md         # 开发者指南
     └── feature-image-composite-requirements.md
 ```
 
 ## 技术栈
 
 - **后端**：FastAPI + uvicorn
-- **前端**：原生 HTML/CSS/JS（视频工具）、React 18（图片工具、抠图工具、溶图工具）
+- **前端**：原生 HTML/CSS/JS（视频工具）、React 18 + Vite（图片工具、抠图工具、去字工具、溶图工具）
 - **视频解析**：自定义多平台解析器 + yt-dlp
 - **AI 抠图**：rembg + ONNX Runtime + MobileNetV3（自动选择 rmbg-2.0 / isnet-general-use / u2net）
 - **图片处理**：Pillow (PIL)
+
+## 常见问题
+
+### 图片处理工具白屏
+
+**现象**：访问"智能抠图"、"图片批处理"等工具页面时，页面一片空白，但服务器没有报错。
+
+**原因**：浏览器在加载工具的 JavaScript 文件时，因为缺少一个安全标记（CORS 头），浏览器会静默拒绝执行脚本，导致页面无法渲染。
+
+**一键修复**：双击 `app.bat` 或运行 `python launcher.py` 即可。
+
+首次运行会自动构建前端，后续启动直接跳过。修改了前端源码后，双击 `rebuild.bat` 重新构建。
 
 ## License
 

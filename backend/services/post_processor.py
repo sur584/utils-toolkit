@@ -13,24 +13,23 @@ logger = logging.getLogger(__name__)
 class PostProcessor:
     """抠图结果的边缘优化"""
 
-    # 各模型的 Alpha Matting 参数
-    ALPHA_PARAMS = {
-        "bria-rmbg": {
+    def __init__(self, model_manager=None):
+        if model_manager is None:
+            from .model_manager import ModelManager
+            model_manager = ModelManager()
+        self._model_manager = model_manager
+
+    def _build_alpha_params(self, model_name: str) -> dict:
+        """从 ModelManager 的模型配置中提取 alpha matting 参数"""
+        cfg = self._model_manager.get_model_params(model_name)
+        if not cfg.get("alpha_matting"):
+            return {"enabled": False}
+        return {
             "enabled": True,
-            "foreground_threshold": 240,
-            "background_threshold": 10,
-            "erode_size": 5,
-        },
-        "isnet-general-use": {
-            "enabled": True,
-            "foreground_threshold": 240,
-            "background_threshold": 10,
-            "erode_size": 5,
-        },
-        "u2net": {
-            "enabled": False,
-        },
-    }
+            "foreground_threshold": cfg.get("alpha_matting_foreground_threshold", 240),
+            "background_threshold": cfg.get("alpha_matting_background_threshold", 10),
+            "erode_size": cfg.get("alpha_matting_erode_size", 5),
+        }
 
     def process(self, result: Image.Image, model_name: str) -> Image.Image:
         """
@@ -54,7 +53,7 @@ class PostProcessor:
         a_smooth = a.filter(ImageFilter.GaussianBlur(radius=1.5))
 
         # 2. Alpha 优化（根据模型参数）
-        params = self.ALPHA_PARAMS.get(model_name, {})
+        params = self._build_alpha_params(model_name)
         if params.get("enabled"):
             a_smooth = self._optimize_alpha(a_smooth, params)
 
@@ -105,4 +104,4 @@ class PostProcessor:
 
     def get_alpha_params(self, model_name: str) -> dict:
         """获取模型的 alpha matting 参数（供 rembg.remove 调用）"""
-        return self.ALPHA_PARAMS.get(model_name, {})
+        return self._build_alpha_params(model_name)

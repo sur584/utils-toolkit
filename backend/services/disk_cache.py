@@ -1,92 +1,134 @@
 """
-磁盘持久化 LRU 缓存 - 替代内存缓存，支持 TTL 和容量限制
+磁盘持久化 LRU 缓存 - 支持 TTL、磁盘大小限制、双阈值淘汰、后台清理
 """
 
 import hashlib
 import json
 import logging
-import os
+import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-class DiskCache:
-    """基于文件系统的 LRU 缓存，支持 TTL 自动过期"""
+@dataclass
+class CacheConfig:
+    """缓存配置 - 所有可调参数集中管理"""
+    cache_dir: str = "cache"
+    max_entries: int = 300
+    ttl_days: int = 7
+    max_disk_mb: int = 500
+    soft_threshold: float = 0.80
+    hard_threshold: float = 0.95
+    cleanup_interval_minutes: int = 10
 
-    def __init__(self, cache_dir: str = "cache", max_entries: int = 300, ttl_days: int = 7):
-        self.cache_dir = Path(cache_dir)
+    soft_limit_bytes: int = field(init=False)
+    hard_limit_bytes: int = field(init=False)
+    max_disk_bytes: int = field(init=False)
+
+    def __post_init__(self):
+        self.max_disk_bytes = self.max_disk_mb * 1024 * 1024
+        self.soft_limit_bytes = int(self.max_disk_bytes * self.soft_threshold)
+        self.hard_limit_bytes = int(self.max_disk_bytes * self.hard_threshold)
+
+
+class DiskCache:
+    """基于文件系统的 LRU 缓存，支持 TTL、磁盘大小限制、后台清理"""
+
+    def __init__(self, cache_dir: str = "cache", max_entries: int = 300,
+                 ttl_days: int = 7, config: Optional[CacheConfig] = None):
+        if config is None:
+            config = CacheConfig(cache_dir=cache_dir, max_entries=max_entries, ttl_days=ttl_days)
+        self.config = config
+        self.cache_dir = Path(config.cache_dir)
         self.images_dir = self.cache_dir / "images"
         self.metadata_dir = self.cache_dir / "metadata"
-        self.max_entries = max_entries
-        self.ttl_seconds = ttl_days * 86400
+        self.ttl_seconds = config.ttl_days * 86400
+        self._lock = threading.Lock()
+        self._cleanup_timer: Optional[threading.Timer] = None
+        self._stats = {"hits": 0, "misses": 0}
+        self._running = False
         self._ensure_dirs()
 
     def _ensure_dirs(self):
-        """创建缓存目录结构"""
         self.images_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
 
     def _hash_key(self, key: str) -> str:
-        """将 key 转为文件名安全的 hash"""
         return hashlib.sha256(key.encode()).hexdigest()[:32]
 
+    def _dir_size_bytes(self) -> int:
+        total = 0
+        try:
+            for f in self.images_dir.glob("*.png"):
+                total += f.stat().st_size
+        except Exception:
+            pass
+        return total
+
     def get(self, key: str) -> Optional[bytes]:
-        """
-        查找缓存。命中时更新访问时间并返回图片字节，未命中返回 None。
-        """
         h = self._hash_key(key)
         img_path = self.images_dir / f"{h}.png"
         meta_path = self.metadata_dir / f"{h}.json"
 
         if not img_path.exists():
+            with self._lock:
+                self._stats["misses"] += 1
             return None
 
-        # 检查 TTL
+        # TTL 检查
         try:
             if meta_path.exists():
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 created = meta.get("created", 0)
                 if time.time() - created > self.ttl_seconds:
                     self._remove(h)
+                    with self._lock:
+                        self._stats["misses"] += 1
                     return None
             else:
-                # 无元数据，用文件修改时间
                 mtime = img_path.stat().st_mtime
                 if time.time() - mtime > self.ttl_seconds:
                     self._remove(h)
+                    with self._lock:
+                        self._stats["misses"] += 1
                     return None
         except Exception:
             pass
 
         # 更新访问时间
-        self._update_access(h, key)
+        with self._lock:
+            self._update_access(h, key)
 
         try:
-            return img_path.read_bytes()
+            data = img_path.read_bytes()
+            with self._lock:
+                self._stats["hits"] += 1
+            return data
         except Exception as e:
             logger.warning(f"缓存读取失败: {e}")
+            with self._lock:
+                self._stats["misses"] += 1
             return None
 
     def put(self, key: str, value: bytes, metadata: dict = None):
-        """写入缓存，超过容量时淘汰最久未访问的条目"""
         h = self._hash_key(key)
         img_path = self.images_dir / f"{h}.png"
 
         try:
             img_path.write_bytes(value)
-            self._update_access(h, key, metadata)
+            with self._lock:
+                self._update_access(h, key, metadata)
         except Exception as e:
             logger.warning(f"缓存写入失败: {e}")
             return
 
-        # 容量检查
         self._evict_if_needed()
 
     def _update_access(self, h: str, key: str, extra: dict = None):
-        """更新元数据文件"""
         meta_path = self.metadata_dir / f"{h}.json"
         meta = {
             "key": key,
@@ -95,7 +137,6 @@ class DiskCache:
         }
         if extra:
             meta.update(extra)
-        # 如果已有元数据，保留 created 时间
         if meta_path.exists():
             try:
                 old = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -108,7 +149,6 @@ class DiskCache:
             pass
 
     def _remove(self, h: str):
-        """删除单个缓存条目"""
         try:
             img_path = self.images_dir / f"{h}.png"
             meta_path = self.metadata_dir / f"{h}.json"
@@ -120,34 +160,63 @@ class DiskCache:
             pass
 
     def _evict_if_needed(self):
-        """超过容量时淘汰最旧的条目"""
         try:
-            metas = []
-            for f in self.metadata_dir.glob("*.json"):
+            entries = []
+            for meta_file in self.metadata_dir.glob("*.json"):
                 try:
-                    data = json.loads(f.read_text(encoding="utf-8"))
-                    metas.append((f.stem, data.get("access_time", 0)))
+                    data = json.loads(meta_file.read_text(encoding="utf-8"))
+                    h = meta_file.stem
+                    img_path = self.images_dir / f"{h}.png"
+                    size = img_path.stat().st_size if img_path.exists() else 0
+                    entries.append((h, data.get("access_time", 0), size))
                 except Exception:
                     continue
 
-            if len(metas) <= self.max_entries:
+            if not entries:
                 return
 
-            # 按访问时间排序，淘汰最旧的
-            metas.sort(key=lambda x: x[1])
-            to_remove = len(metas) - self.max_entries
-            for h, _ in metas[:to_remove]:
+            # 条目数限制
+            if len(entries) > self.config.max_entries:
+                entries.sort(key=lambda x: x[1])
+                to_remove_count = len(entries) - self.config.max_entries
+                for h, _, _ in entries[:to_remove_count]:
+                    self._remove(h)
+                entries = entries[to_remove_count:]
+                logger.info(f"缓存淘汰 {to_remove_count} 个条目（条目数超限）")
+
+            # 磁盘大小限制
+            disk_usage = self._dir_size_bytes()
+            if disk_usage <= self.config.soft_limit_bytes:
+                return
+
+            if disk_usage > self.config.hard_limit_bytes:
+                target_bytes = self.config.soft_limit_bytes
+            else:
+                target_bytes = int(self.config.max_disk_bytes * 0.70)
+
+            entries.sort(key=lambda x: x[1])
+            bytes_to_free = disk_usage - target_bytes
+            freed = 0
+            evicted = 0
+            for h, _, size in entries:
+                if freed >= bytes_to_free:
+                    break
                 self._remove(h)
-            logger.info(f"缓存淘汰 {to_remove} 个条目")
+                freed += size
+                evicted += 1
+
+            if evicted > 0:
+                logger.info(
+                    f"磁盘清理：淘汰 {evicted} 个条目（{freed / 1024 / 1024:.1f}MB），"
+                    f"磁盘占用 {disk_usage / 1024 / 1024:.1f}MB -> 目标 {target_bytes / 1024 / 1024:.1f}MB"
+                )
         except Exception as e:
             logger.warning(f"缓存淘汰失败: {e}")
 
     def cleanup(self):
-        """启动时清理过期条目和损坏文件"""
         cleaned = 0
         now = time.time()
 
-        # 清理过期
         for meta_path in self.metadata_dir.glob("*.json"):
             try:
                 data = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -156,11 +225,9 @@ class DiskCache:
                     self._remove(meta_path.stem)
                     cleaned += 1
             except Exception:
-                # 损坏的元数据也清理
                 self._remove(meta_path.stem)
                 cleaned += 1
 
-        # 清理孤立图片（没有元数据的图片，超过 TTL）
         for img_path in self.images_dir.glob("*.png"):
             meta_path = self.metadata_dir / f"{img_path.stem}.json"
             if not meta_path.exists():
@@ -169,24 +236,65 @@ class DiskCache:
                     img_path.unlink()
                     cleaned += 1
 
+        self._evict_if_needed()
+
         if cleaned > 0:
             logger.info(f"缓存清理完成，移除 {cleaned} 个过期条目")
-
-        # 初始化目录
         self._ensure_dirs()
 
     def stats(self) -> dict:
-        """返回缓存统计信息"""
         image_count = len(list(self.images_dir.glob("*.png")))
+        disk_bytes = self._dir_size_bytes()
+        total_requests = self._stats["hits"] + self._stats["misses"]
         return {
             "entries": image_count,
-            "max_entries": self.max_entries,
-            "ttl_days": self.ttl_seconds // 86400,
+            "max_entries": self.config.max_entries,
+            "disk_mb": round(disk_bytes / 1024 / 1024, 2),
+            "max_disk_mb": self.config.max_disk_mb,
+            "disk_usage_percent": round(disk_bytes / self.config.max_disk_bytes * 100, 1) if self.config.max_disk_bytes > 0 else 0,
+            "soft_limit_mb": round(self.config.soft_limit_bytes / 1024 / 1024, 1),
+            "hard_limit_mb": round(self.config.hard_limit_bytes / 1024 / 1024, 1),
+            "ttl_days": self.config.ttl_days,
             "cache_dir": str(self.cache_dir),
+            "hits": self._stats["hits"],
+            "misses": self._stats["misses"],
+            "hit_rate": round(self._stats["hits"] / total_requests * 100, 1) if total_requests > 0 else 0,
+            "background_cleanup_running": self._running,
+            "cleanup_interval_minutes": self.config.cleanup_interval_minutes,
         }
+
+    def start_background_cleanup(self):
+        if self._running:
+            return
+        self._running = True
+        self._schedule_cleanup()
+        logger.info(f"后台缓存清理已启动（间隔: {self.config.cleanup_interval_minutes} 分钟）")
+
+    def _schedule_cleanup(self):
+        if not self._running:
+            return
+        interval = self.config.cleanup_interval_minutes * 60
+        self._cleanup_timer = threading.Timer(interval, self._background_cleanup_tick)
+        self._cleanup_timer.daemon = True
+        self._cleanup_timer.start()
+
+    def _background_cleanup_tick(self):
+        if not self._running:
+            return
+        try:
+            self.cleanup()
+        except Exception as e:
+            logger.warning(f"后台清理异常: {e}")
+        finally:
+            self._schedule_cleanup()
+
+    def stop_background_cleanup(self):
+        self._running = False
+        if self._cleanup_timer:
+            self._cleanup_timer.cancel()
+            self._cleanup_timer = None
 
     @staticmethod
     def make_key(data: bytes, model: str, param_version: str = "v1") -> str:
-        """生成缓存 key：md5(图片数据) + 模型版本 + 参数版本"""
         h = hashlib.md5(data).hexdigest()
         return f"{h}_{model}_{param_version}"

@@ -61,7 +61,7 @@ class TaskQueue:
 
         results = [None] * total
         executor = self._get_executor()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         async def run_one(idx, task):
             try:
