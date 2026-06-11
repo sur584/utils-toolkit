@@ -6,6 +6,15 @@ import os
 import logging
 from pathlib import Path
 
+# 加载 .env 文件
+_env_file = Path(__file__).resolve().parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+
 # ─── 路径常量 ─────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
@@ -16,6 +25,7 @@ IMAGE_TOOL_DIR = PROJECT_DIR / "tools" / "image-tool"
 BG_REMOVER_DIR = PROJECT_DIR / "tools" / "bg-remover"
 IMAGE_COMPOSITE_DIR = PROJECT_DIR / "tools" / "image-composite"
 TEXT_REMOVER_DIR = PROJECT_DIR / "tools" / "text-remover"
+WX_VIDEO_PARSER_DIR = PROJECT_DIR / "tools" / "wx-video-parser"
 MODELS_DIR = PROJECT_DIR / "models"
 LIBS_DIR = PROJECT_DIR / "tools" / "libs"
 
@@ -34,3 +44,6 @@ logging.basicConfig(
         logging.FileHandler(BASE_DIR / "app.log", encoding="utf-8"),
     ],
 )
+
+# ─── 视频号解析 cookie ─────────────────────────────────
+YUANBAO_COOKIE = os.environ.get("YUANBAO_COOKIE", "")

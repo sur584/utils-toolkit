@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频号解析 - 小小工具箱</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📹</text></svg>">
+    <link rel="stylesheet" href="../libs/theme.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        [data-theme="light"] body {
+            background-image: linear-gradient(135deg, #f4f5f9 0%, #f8f7fa 50%, #f5f8fa 100%);
+        }
+        [data-theme="dark"] body {
+            background-image: radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99,102,241,0.03) 0%, transparent 50%),
+                              radial-gradient(ellipse 60% 50% at 80% 90%, rgba(100,116,139,0.03) 0%, transparent 50%);
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(circle at 20% 20%, rgba(99,102,241,0.03) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(139,92,246,0.02) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ─── 头部 ─── */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+        }
+        [data-theme="light"] .header {
+            background: rgba(255,255,255,0.6);
+            border-bottom: 1px solid rgba(255,255,255,0.6);
+        }
+        [data-theme="dark"] .header {
+            background: rgba(16,16,26,0.75);
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .header-inner {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .back-home {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 14px;
+            transition: color .2s;
+            white-space: nowrap;
+        }
+        .back-home:hover { color: var(--text-primary); }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: var(--gradient);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+        }
+        .logo h1 {
+            font-size: 17px;
+            font-weight: 700;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .theme-toggle {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all .2s;
+            flex-shrink: 0;
+        }
+        .theme-toggle:hover {
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+
+        /* ─── 主内容 ─── */
+        .main-content {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 32px 24px 60px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ─── 卡片 ─── */
+        .card {
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: var(--radius);
+            padding: 28px;
+            box-shadow: var(--shadow);
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+        }
+        [data-theme="light"] .card {
+            background: rgba(255,255,255,0.65);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.55), 0 2px 16px rgba(0,0,0,0.05);
+        }
+        [data-theme="dark"] .card {
+            background: rgba(22,22,35,0.7);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05), 0 2px 16px rgba(0,0,0,0.2);
+        }
+
+        .card-header { margin-bottom: 20px; }
+        .card-header h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+        .card-header .subtitle { color: var(--text-secondary); font-size: 14px; }
+
+        /* ─── 输入区 ─── */
+        .url-input {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 14px 16px;
+            color: var(--text-primary);
+            font-size: 15px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color .2s, box-shadow .2s;
+            resize: none;
+            line-height: 1.6;
+        }
+        .url-input:focus {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .url-input::placeholder { color: var(--text-muted); }
+
+        .input-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        /* ─── 按钮 ─── */
+        .btn {
+            padding: 10px 20px;
+            border-radius: var(--radius-sm);
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all .2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+        .btn-primary {
+            background: var(--gradient);
+            color: #fff;
+            box-shadow: 0 2px 8px var(--accent-glow);
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: linear-gradient(135deg, var(--accent-hover), var(--accent));
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px var(--accent-glow);
+        }
+        .btn-secondary {
+            background: var(--bg-input);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover:not(:disabled) {
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+        .btn-ghost:hover:not(:disabled) {
+            color: var(--text-primary);
+            background: var(--accent-glow);
+            border-color: var(--accent);
+        }
+        .btn-lg { padding: 12px 28px; font-size: 15px; }
+        .btn-sm { padding: 6px 14px; font-size: 13px; }
+        .btn-block { flex: 1; justify-content: center; }
+
+        /* ─── 状态栏 ─── */
+        .status-bar {
+            margin-top: 16px;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            line-height: 1.6;
+            display: none;
+        }
+        .status-bar.show { display: block; }
+        .status-bar.info { background: var(--accent-glow); color: var(--accent); }
+        .status-bar.success { background: rgba(34,197,94,0.1); color: var(--success); }
+        .status-bar.error { background: rgba(239,68,68,0.1); color: var(--danger); }
+
+        /* ─── 结果面板 ─── */
+        .result-panel {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            display: none;
+            animation: slideUp .3s ease;
+        }
+        .result-panel.show { display: block; }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .video-info {
+            display: flex;
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+        .video-cover-wrap {
+            width: 140px;
+            height: 186px;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            position: relative;
+            background: var(--bg-input);
+            flex-shrink: 0;
+        }
+        .video-cover {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .platform-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: var(--gradient);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 6px;
+        }
+
+        .video-meta { flex: 1; min-width: 0; }
+        .video-title {
+            font-size: 16px;
+            font-weight: 700;
+            line-height: 1.5;
+            margin-bottom: 14px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .meta-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+        .meta-label { color: var(--text-muted); min-width: 32px; }
+        .meta-value { color: var(--text-secondary); }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        /* ─── 视频直链展示 ─── */
+        .url-display { margin-bottom: 16px; }
+        .url-display-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            margin-bottom: 6px;
+        }
+        .url-display-box {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            word-break: break-all;
+            max-height: 72px;
+            overflow-y: auto;
+            font-family: "SF Mono", "Fira Code", Monaco, Consolas, monospace;
+            line-height: 1.6;
+        }
+        .url-display-box a { color: var(--accent); text-decoration: none; }
+        .url-display-box a:hover { text-decoration: underline; }
+
+        /* ─── 手动输入 ─── */
+        .manual-video-url {
+            margin-top: 16px;
+            padding: 16px;
+            background: rgba(245,158,11,0.06);
+            border: 1px solid rgba(245,158,11,0.15);
+            border-radius: var(--radius-sm);
+        }
+        .manual-url-header {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--warning);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .manual-url-hint {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+        .manual-url-input-group {
+            display: flex;
+            gap: 8px;
+        }
+        .manual-url-input {
+            flex: 1;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color .2s, box-shadow .2s;
+        }
+        .manual-url-input:focus {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .manual-url-input::placeholder { color: var(--text-muted); }
+
+        /* ─── 使用说明 ─── */
+        .guide-card {
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+        [data-theme="light"] .guide-card {
+            background: rgba(255,255,255,0.65);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.55), 0 2px 16px rgba(0,0,0,0.05);
+        }
+        [data-theme="dark"] .guide-card {
+            background: rgba(22,22,35,0.7);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05), 0 2px 16px rgba(0,0,0,0.2);
+        }
+        .guide-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+        .guide-card ol { padding-left: 20px; color: var(--text-secondary); font-size: 14px; line-height: 2; }
+        .guide-examples {
+            margin-top: 14px;
+            padding: 14px;
+            background: var(--bg-input);
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.8;
+            font-family: "SF Mono", "Fira Code", Monaco, Consolas, monospace;
+        }
+        .tip-box {
+            margin-top: 16px;
+            background: var(--accent-glow);
+            border: 1px solid rgba(99,102,241,0.2);
+            border-radius: var(--radius-sm);
+            padding: 14px 16px;
+            font-size: 13px;
+            color: var(--accent);
+            line-height: 1.7;
+        }
+        .tip-box a { color: var(--accent); font-weight: 600; }
+        .tip-box a:hover { text-decoration: underline; }
+
+        /* ─── 加载动画 ─── */
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .6s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ─── Toast ─── */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .toast {
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 18px;
+            font-size: 13px;
+            box-shadow: var(--shadow);
+            animation: toastIn .3s ease, toastOut .3s ease 2.7s forwards;
+            max-width: 320px;
+            color: var(--text-primary);
+        }
+        [data-theme="light"] .toast { background: rgba(255,255,255,0.85); }
+        [data-theme="dark"] .toast { background: rgba(22,22,35,0.9); }
+        .toast.success { border-left: 3px solid var(--success); }
+        .toast.error { border-left: 3px solid var(--danger); }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-10px); } }
+
+        /* ─── Footer ─── */
+        .footer {
+            text-align: center;
+            padding: 24px;
+            font-size: 13px;
+            color: var(--text-muted);
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ─── 响应式 ─── */
+        @media (max-width: 480px) {
+            .header-inner { padding: 12px 16px; }
+            .main-content { padding: 20px 16px 40px; }
+            .card { padding: 20px; }
+            .video-info { flex-direction: column; }
+            .video-cover-wrap { width: 100%; height: 200px; }
+            .action-buttons { flex-direction: column; }
+            .action-buttons .btn { width: 100%; justify-content: center; }
+            .logo h1 { font-size: 15px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <a href="../" class="back-home">← 工具箱</a>
+            <div class="logo">
+                <span class="logo-icon">📹</span>
+                <h1>视频号解析</h1>
+            </div>
+            <button class="theme-toggle" id="themeToggle" title="切换主题">
+                <span class="theme-icon">☀</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="card">
+            <div class="card-header">
+                <h2>解析视频号链接</h2>
+                <p class="subtitle">粘贴微信视频号分享链接，获取视频信息与直链</p>
+            </div>
+
+            <textarea id="urlInput" class="url-input" rows="3"
+                placeholder="粘贴视频号分享链接，例如：&#10;https://weixin.qq.com/sph/AdNprKlmRs"></textarea>
+
+            <div class="input-actions">
+                <button class="btn btn-secondary" id="pasteBtn">📋 粘贴</button>
+                <button class="btn btn-primary btn-block" id="parseBtn">
+                    <span class="btn-text">🔍 解析</span>
+                    <span class="btn-loading" style="display:none">
+                        <span class="spinner"></span> 解析中...
+                    </span>
+                </button>
+            </div>
+
+            <div class="status-bar" id="statusBar"></div>
+
+            <div class="result-panel" id="resultPanel">
+                <div class="video-info">
+                    <div class="video-cover-wrap">
+                        <img id="videoCover" class="video-cover" src="" alt="封面">
+                        <span class="platform-badge">视频号</span>
+                    </div>
+                    <div class="video-meta">
+                        <h3 id="videoTitle" class="video-title"></h3>
+                        <div class="meta-row">
+                            <span class="meta-label">作者</span>
+                            <span id="videoAuthor" class="meta-value"></span>
+                        </div>
+                        <div class="meta-row">
+                            <span class="meta-label">点赞</span>
+                            <span id="videoLikes" class="meta-value"></span>
+                        </div>
+                        <div class="meta-row">
+                            <span class="meta-label">评论</span>
+                            <span id="videoComments" class="meta-value"></span>
+                        </div>
+                        <div class="meta-row">
+                            <span class="meta-label">转发</span>
+                            <span id="videoShares" class="meta-value"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="url-display" id="urlDisplay" style="display:none">
+                    <div class="url-display-label">视频直链</div>
+                    <div class="url-display-box" id="urlBox"></div>
+                </div>
+
+                <div class="action-buttons" id="actionButtons">
+                    <button class="btn btn-primary btn-lg btn-block" id="downloadBtn">⬇ 下载视频</button>
+                    <button class="btn btn-ghost btn-lg" id="copyBtn">🔗 复制链接</button>
+                </div>
+
+                <div class="manual-video-url" id="manualInput" style="display:none">
+                    <div class="manual-url-header">🔗 手动输入视频直链</div>
+                    <p class="manual-url-hint">通过抓包工具获取视频URL后粘贴到下方</p>
+                    <div class="manual-url-input-group">
+                        <input type="text" class="manual-url-input" id="manualUrl"
+                            placeholder="粘贴视频直链 (wxapp.tc.qq.com/...)">
+                        <button class="btn btn-primary btn-sm" id="applyUrlBtn">应用</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="guide-card">
+            <h3>使用说明</h3>
+            <ol>
+                <li>在微信中打开视频号，点击分享按钮</li>
+                <li>选择「复制链接」</li>
+                <li>粘贴到上方输入框，点击解析</li>
+                <li>自动获取视频标题、作者、封面等信息</li>
+                <li>如有直链可直接下载，否则通过抓包获取</li>
+            </ol>
+            <div class="guide-examples">
+                支持格式：<br>
+                https://weixin.qq.com/sph/AA5Cpagatb<br>
+                https://channels.weixin.qq.com/finder-preview/pages/sph?id=AA5Cpagatb<br>
+                https://channels.weixin.qq.com/web/pages/feed/xxxxxx
+            </div>
+            <div class="tip-box">
+                <strong>提示：</strong>视频号视频通常需要通过
+                <a href="https://github.com/nicekwell/WeChatVideoDownloader" target="_blank">WeChatVideoDownloader</a>
+                或 Fiddler / Charles 抓包获取视频直链后手动粘贴下载。
+            </div>
+        </div>
+    </main>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <footer class="footer">
+        <p>小小工具箱 — 视频号解析工具 v2.0</p>
+    </footer>
+
+    <script>
+    const API_BASE = window.location.origin;
+    const $ = s => document.querySelector(s);
+
+    let currentData = null;
+
+    // ─── 主题 ───
+    const themeToggle = $('#themeToggle');
+    const themeIcon = themeToggle.querySelector('.theme-icon');
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    themeIcon.textContent = savedTheme === 'dark' ? '🌙' : '☀';
+
+    themeToggle.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+        themeIcon.textContent = next === 'dark' ? '🌙' : '☀';
+    });
+
+    // ─── 粘贴 ───
+    $('#pasteBtn').addEventListener('click', async () => {
+        try {
+            const t = await navigator.clipboard.readText();
+            if (t) { $('#urlInput').value = t; showToast('已粘贴', 'success'); }
+        } catch { showToast('无法读取剪贴板', 'error'); }
+    });
+
+    // ─── 回车解析 ───
+    $('#urlInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleParse(); }
+    });
+
+    // ─── 解析 ───
+    $('#parseBtn').addEventListener('click', handleParse);
+
+    async function handleParse() {
+        let url = $('#urlInput').value.trim();
+        if (!url) { showStatus('请输入视频号链接', 'error'); return; }
+
+        const urlMatch = url.match(/https?:\/\/[^\s<>"')\]]+/);
+        if (urlMatch) url = urlMatch[0];
+
+        setLoading(true);
+        $('#resultPanel').classList.remove('show');
+        showStatus('正在解析...', 'info');
+
+        const start = Date.now();
+
+        try {
+            const resp = await fetch(`${API_BASE}/api/parse`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url }),
+            });
+            const result = await resp.json();
+            const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+
+            if (result.success && result.data) {
+                currentData = result.data;
+                renderResult(result.data);
+                const hasUrl = !!result.data.video_url;
+                showStatus(hasUrl ? `解析成功 (${elapsed}s)` : `已获取元数据 (${elapsed}s)`, hasUrl ? 'success' : 'info');
+            } else {
+                $('#resultPanel').classList.remove('show');
+                showStatus(result.message || '解析失败', 'error');
+            }
+        } catch (err) {
+            $('#resultPanel').classList.remove('show');
+            showStatus(`网络错误: ${err.message}`, 'error');
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    function renderResult(data) {
+        const cover = $('#videoCover');
+        cover.src = data.cover || '';
+        cover.onerror = () => {
+            cover.src = 'data:image/svg+xml,' + encodeURIComponent(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="140" height="186" fill="#f7f8fa"><rect width="140" height="186" rx="10"/><text x="70" y="98" text-anchor="middle" fill="#9ca3af" font-size="13">无封面</text></svg>'
+            );
+        };
+
+        $('#videoTitle').textContent = data.title || '无标题';
+        $('#videoAuthor').textContent = data.author || '未知作者';
+        $('#videoLikes').textContent = formatNum(data.digg_count);
+        $('#videoComments').textContent = formatNum(data.comment_count);
+        $('#videoShares').textContent = formatNum(data.share_count);
+
+        const urlDisplay = $('#urlDisplay');
+        const urlBox = $('#urlBox');
+        const downloadBtn = $('#downloadBtn');
+        const copyBtn = $('#copyBtn');
+        const manualInput = $('#manualInput');
+
+        if (data.video_url) {
+            const displayUrl = data.video_url.startsWith('wx://')
+                ? data.video_url.split('|')[0].replace('wx://', '')
+                : data.video_url;
+            urlBox.innerHTML = `<a href="${esc(displayUrl)}" target="_blank">${esc(displayUrl)}</a>`;
+            urlDisplay.style.display = 'block';
+            downloadBtn.disabled = false;
+            downloadBtn.textContent = '⬇ 下载视频';
+            copyBtn.textContent = '🔗 复制链接';
+            manualInput.style.display = 'none';
+        } else {
+            urlDisplay.style.display = 'none';
+            downloadBtn.disabled = true;
+            downloadBtn.textContent = '⚠ 需要视频直链';
+            copyBtn.textContent = '🔗 复制封面链接';
+            manualInput.style.display = 'block';
+        }
+
+        $('#resultPanel').classList.add('show');
+    }
+
+    // ─── 手动应用 URL ───
+    $('#applyUrlBtn').addEventListener('click', () => {
+        const url = $('#manualUrl').value.trim();
+        if (!url) { showToast('请输入视频直链', 'error'); return; }
+        if (!url.startsWith('http')) { showToast('请输入有效的 URL', 'error'); return; }
+
+        if (currentData) {
+            currentData.video_url = url;
+            currentData.video_url_no_watermark = url;
+            renderResult(currentData);
+            showToast('视频直链已应用，可以下载了', 'success');
+        }
+    });
+    $('#manualUrl').addEventListener('keydown', e => { if (e.key === 'Enter') $('#applyUrlBtn').click(); });
+
+    // ─── 下载 ───
+    $('#downloadBtn').addEventListener('click', async () => {
+        if (!currentData?.video_url) return;
+
+        const btn = $('#downloadBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> 下载中...';
+
+        try {
+            const videoUrl = currentData.video_url;
+            const title = (currentData.title || 'video').substring(0, 50);
+            const resp = await fetch(
+                `${API_BASE}/api/download?video_url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title)}&referer=${encodeURIComponent('https://channels.weixin.qq.com/')}`
+            );
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${resp.status}`);
+            }
+
+            const blob = await resp.blob();
+            const filename = resp.headers.get('Content-Disposition')?.match(/filename=(.+)/)?.[1] || `${title}.mp4`;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+            showToast('下载完成', 'success');
+        } catch (err) {
+            showToast(`下载失败: ${err.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '⬇ 下载视频';
+        }
+    });
+
+    // ─── 复制 ───
+    $('#copyBtn').addEventListener('click', () => {
+        if (currentData?.video_url) {
+            const url = currentData.video_url.startsWith('wx://')
+                ? currentData.video_url.split('|')[0].replace('wx://', '')
+                : currentData.video_url;
+            navigator.clipboard.writeText(url).then(
+                () => showToast('链接已复制', 'success'),
+                () => showToast('复制失败', 'error')
+            );
+        } else if (currentData?.cover) {
+            navigator.clipboard.writeText(currentData.cover).then(
+                () => showToast('封面链接已复制', 'success'),
+                () => showToast('复制失败', 'error')
+            );
+        } else {
+            showToast('无可用链接', 'error');
+        }
+    });
+
+    // ─── 工具函数 ───
+    function setLoading(l) {
+        $('#parseBtn').querySelector('.btn-text').style.display = l ? 'none' : 'inline';
+        $('#parseBtn').querySelector('.btn-loading').style.display = l ? 'inline-flex' : 'none';
+        $('#parseBtn').disabled = l;
+    }
+
+    function showStatus(msg, type = 'info') {
+        const el = $('#statusBar');
+        el.textContent = msg;
+        el.className = `status-bar show ${type}`;
+    }
+
+    function showToast(msg, type = 'success') {
+        const container = $('#toastContainer');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = msg;
+        container.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    function formatNum(n) {
+        if (!n) return '0';
+        if (n >= 10000) return (n / 10000).toFixed(1) + '万';
+        return String(n);
+    }
+
+    function esc(s) {
+        return s ? String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') : '';
+    }
+    </script>
+</body>
+</html>

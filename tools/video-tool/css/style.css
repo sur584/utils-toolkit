@@ -1,42 +1,4 @@
-/* ─── CSS 变量（主题色） ──────────────────────── */
-:root {
-    --bg-primary: #111118;
-    --bg-secondary: rgba(16, 16, 26, 0.82);
-    --bg-card: rgba(22, 22, 35, 0.7);
-    --bg-input: rgba(255, 255, 255, 0.05);
-    --border: rgba(255, 255, 255, 0.06);
-    --border-focus: rgba(129, 140, 248, 0.4);
-    --text-primary: #eeeef2;
-    --text-secondary: #a8a8b8;
-    --text-muted: #6e6e82;
-    --accent: #818cf8;
-    --accent-hover: #a5b4fc;
-    --accent-glow: rgba(129, 140, 248, 0.12);
-    --danger: #ef4444;
-    --success: #22c55e;
-    --warning: #f59e0b;
-    --gradient: linear-gradient(135deg, #6366f1, #a78bfa);
-    --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-    --radius: 12px;
-    --radius-sm: 8px;
-    --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-[data-theme="light"] {
-    --bg-primary: #f4f5f9;
-    --bg-secondary: rgba(255, 255, 255, 0.55);
-    --bg-card: rgba(255, 255, 255, 0.65);
-    --bg-input: rgba(255, 255, 255, 0.6);
-    --border: rgba(255, 255, 255, 0.6);
-    --border-focus: #6366f1;
-    --text-primary: #1a1d2e;
-    --text-secondary: #5a6478;
-    --text-muted: #9ca3af;
-    --accent: #6366f1;
-    --accent-hover: #4f46e5;
-    --accent-glow: rgba(99, 102, 241, 0.08);
-    --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-}
+/* 主题变量统一由 ../libs/theme.css 提供 */
 
 /* ─── 全局重置 ──────────────────────────────── */
 *, *::before, *::after {

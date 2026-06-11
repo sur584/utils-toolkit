@@ -1,115 +1,128 @@
 """
 微信视频号视频解密模块
-实现 ISAAC 流密码解密算法
+实现 ISAAC-64 流密码解密算法（与 wx_channels_download 一致）
+参考: https://github.com/Hanson/WechatSphDecrypt
 """
 
 import struct
 
+# ISAAC-64 常量：黄金比例
+GOLDEN_RATIO = 0x9e3779b97f4a7c13
+MASK64 = 0xFFFFFFFFFFFFFFFF
 
-class ISAAC:
-    """ISAAC 随机数生成器"""
 
-    def __init__(self, seed: int):
-        self.count = 0
-        self.rsl = [0] * 256
-        self.mem = [0] * 256
-        self.a = 0
-        self.b = 0
-        self.c = 0
-        self._init(seed)
+def _mix(v):
+    """8-way parallel mixing function"""
+    v[0] = (v[0] ^ (v[1] << 11)) & MASK64; v[3] = (v[3] + v[0]) & MASK64; v[1] = (v[1] + v[3]) & MASK64
+    v[1] = (v[1] ^ (v[3] >> 2)) & MASK64; v[4] = (v[4] + v[1]) & MASK64; v[3] = (v[3] + v[4]) & MASK64
+    v[3] = (v[3] ^ (v[4] << 8)) & MASK64; v[5] = (v[5] + v[3]) & MASK64; v[4] = (v[4] + v[5]) & MASK64
+    v[4] = (v[4] ^ (v[5] >> 16)) & MASK64; v[6] = (v[6] + v[4]) & MASK64; v[5] = (v[5] + v[6]) & MASK64
+    v[5] = (v[5] ^ (v[6] << 10)) & MASK64; v[7] = (v[7] + v[5]) & MASK64; v[6] = (v[6] + v[7]) & MASK64
+    v[6] = (v[6] ^ (v[7] >> 4)) & MASK64; v[0] = (v[0] + v[6]) & MASK64; v[7] = (v[7] + v[0]) & MASK64
+    v[7] = (v[7] ^ (v[0] << 8)) & MASK64; v[1] = (v[1] + v[7]) & MASK64; v[0] = (v[0] + v[1]) & MASK64
+    v[0] = (v[0] ^ (v[1] >> 9)) & MASK64; v[2] = (v[2] + v[0]) & MASK64; v[1] = (v[1] + v[2]) & MASK64
+    v[1] = (v[1] ^ (v[2] << 3)) & MASK64; v[3] = (v[3] + v[1]) & MASK64; v[2] = (v[2] + v[3]) & MASK64
+    v[2] = (v[2] ^ (v[3] >> 10)) & MASK64; v[4] = (v[4] + v[2]) & MASK64; v[3] = (v[3] + v[4]) & MASK64
+    v[3] = (v[3] ^ (v[4] << 15)) & MASK64; v[5] = (v[5] + v[3]) & MASK64; v[4] = (v[4] + v[5]) & MASK64
 
-    def _init(self, seed: int):
-        """初始化 ISAAC 状态"""
-        # 设置种子
-        self.mem[0] = seed
-        for i in range(1, 256):
-            self.mem[i] = (self.mem[i - 1] * 1103515245 + 12345) & 0xFFFFFFFF
 
-        # 混合状态
-        for _ in range(4):
-            self._mix()
+class ISAAC64:
+    """ISAAC-64 随机数生成器（与 Go 版本一致）"""
 
-        # 填充随机数缓冲区
+    def __init__(self, key: int):
+        self.mm = [0] * 256
+        self.aa = 0
+        self.bb = 0
+        self.cc = 0
+        self.rand_rsl = [0] * 256
+        self.rand_cnt = 256
+        self._init(key)
+
+    def _init(self, key: int):
+        # 初始化种子数组
+        seed = [0] * 256
+        seed[0] = key & MASK64
+
+        # 第一轮：用 seed 初始化 mm
+        v = [GOLDEN_RATIO] * 8
         for i in range(0, 256, 8):
-            self.a = (self.a + self.mem[i]) & 0xFFFFFFFF
-            self.b = (self.b + self.mem[i + 1]) & 0xFFFFFFFF
-            self.c = (self.c + self.mem[i + 2]) & 0xFFFFFFFF
-            self._isaac()
             for j in range(8):
-                self.mem[i + j] = (self.mem[i + j] + self.rsl[j]) & 0xFFFFFFFF
+                v[j] = (v[j] + seed[i + j]) & MASK64
+            _mix(v)
+            for j in range(8):
+                self.mm[i + j] = v[j]
 
-        self._isaac()
-        self.count = 256
+        # 第二轮：用 mm 自身混合
+        for i in range(0, 256, 8):
+            for j in range(8):
+                v[j] = (v[j] + self.mm[i + j]) & MASK64
+            _mix(v)
+            for j in range(8):
+                self.mm[i + j] = v[j]
 
-    def _mix(self):
-        """混合操作"""
-        self.a = self.a ^ (self.a << 13) & 0xFFFFFFFF
-        self.a = self.a ^ (self.a >> 6) & 0xFFFFFFFF
-        self.a = self.a ^ (self.a << 2) & 0xFFFFFFFF
-        self.b = self.b ^ (self.b << 2) & 0xFFFFFFFF
-        self.b = self.b ^ (self.b >> 16) & 0xFFFFFFFF
-        self.b = self.b ^ (self.a << 10) & 0xFFFFFFFF
-        self.c = self.c ^ (self.c >> 11) & 0xFFFFFFFF
-        self.c = self.c ^ (self.c << 7) & 0xFFFFFFFF
-        self.c = self.c ^ (self.a << 13) & 0xFFFFFFFF
-        self.c = self.c ^ (self.c >> 18) & 0xFFFFFFFF
-        self.c = self.c ^ (self.b << 3) & 0xFFFFFFFF
-        self.c = self.c ^ (self.c >> 10) & 0xFFFFFFFF
+        # 生成第一批随机数
+        self._isaac64()
+        self.rand_cnt = 256
 
-    def _isaac(self):
-        """生成一组随机数"""
-        self.c = (self.c + 1) & 0xFFFFFFFF
-        self.b = (self.b + self.c) & 0xFFFFFFFF
+    def _isaac64(self):
+        self.cc = (self.cc + 1) & MASK64
+        self.bb = (self.bb + self.cc) & MASK64
 
         for i in range(256):
-            x = self.mem[i]
+            x = self.mm[i]
             match i & 3:
                 case 0:
-                    self.a = (self.a ^ (self.a << 13)) & 0xFFFFFFFF
+                    self.aa = (self.aa ^ (self.aa << 13)) & MASK64
                 case 1:
-                    self.a = (self.a ^ (self.a >> 6)) & 0xFFFFFFFF
+                    self.aa = (self.aa ^ (self.aa >> 6)) & MASK64
                 case 2:
-                    self.a = (self.a ^ (self.a << 2)) & 0xFFFFFFFF
+                    self.aa = (self.aa ^ (self.aa << 2)) & MASK64
                 case 3:
-                    self.a = (self.a ^ (self.a >> 16)) & 0xFFFFFFFF
+                    self.aa = (self.aa ^ (self.aa >> 16)) & MASK64
 
-            self.a = (self.mem[(i + 128) & 0xFF] + self.a) & 0xFFFFFFFF
-            y = (self.mem[(self.rsl[i] >> 2) & 0xFF] + self.a + self.b) & 0xFFFFFFFF
-            self.mem[i] = y
-            self.b = (self.mem[(y >> 10) & 0xFF] + x) & 0xFFFFFFFF
-            self.rsl[i] = self.b
+            self.aa = (self.mm[(i + 128) & 0xFF] + self.aa) & MASK64
+            y = (self.mm[(self.rand_rsl[i] >> 3) & 0xFF] + self.aa + self.bb) & MASK64
+            self.mm[i] = y
+            self.bb = (self.mm[(y >> 11) & 0xFF] + x) & MASK64
+            self.rand_rsl[i] = self.bb
 
     def random(self) -> int:
-        """返回一个 32 位随机数"""
-        if self.count == 0:
-            self._isaac()
-            self.count = 256
-        self.count -= 1
-        return self.rsl[self.count]
+        """返回一个 64 位随机数"""
+        if self.rand_cnt == 0:
+            self._isaac64()
+            self.rand_cnt = 256
+        self.rand_cnt -= 1
+        return self.rand_rsl[self.rand_cnt]
 
 
-def decrypt_isaac(data: bytes, key: int) -> bytes:
+# 默认加密长度：前 128KB
+DEFAULT_ENC_LEN = 131072
+
+
+def decrypt_isaac(data: bytearray, key: int, enc_len: int = DEFAULT_ENC_LEN) -> bytearray:
     """
-    使用 ISAAC 流密码解密视频数据
+    使用 ISAAC-64 流密码解密视频数据
 
     Args:
-        data: 加密的视频数据
-        key: 解密密钥
+        data: 加密的视频数据（可变字节数组）
+        key: 64 位解密密钥
+        enc_len: 加密区域长度（默认 128KB）
 
     Returns:
         解密后的视频数据
     """
-    if not data:
+    if not data or not key:
         return data
 
-    ctx = ISAAC(key)
-    result = bytearray(len(data))
+    ctx = ISAAC64(key)
+    actual_len = min(enc_len, len(data))
 
-    for i in range(len(data)):
-        # 生成密钥流
-        if i % 4 == 0:
-            key_stream = ctx.random()
-        # 逐字节异或
-        result[i] = data[i] ^ ((key_stream >> (8 * (i % 4))) & 0xFF)
+    for i in range(0, actual_len, 8):
+        rand_number = ctx.random()
+        # 大端序转字节
+        rand_bytes = struct.pack('>Q', rand_number)
+        remaining = min(8, actual_len - i)
+        for j in range(remaining):
+            data[i + j] ^= rand_bytes[j]
 
-    return bytes(result)
+    return data

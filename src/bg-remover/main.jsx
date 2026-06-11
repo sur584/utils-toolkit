@@ -132,13 +132,18 @@ async function processSingle(img, retryCount){
 }
 
 // ==================== 手动编辑画笔 ====================
-function EditCanvas({resultUrl, thumbUrl, zoom, pan, editMode, brushSize, onSave, onCancel}){
+function EditCanvas({resultUrl, thumbUrl, zoom, pan, setPan, editMode, brushSize, onSave, onCancel}){
   var canvasRef = useRef(null);
   var sourceRef = useRef(null);  // 缩放后的原图（用于恢复笔刷）
   var drawingRef = useRef(false);
   var lastPosRef = useRef(null);  // 上一个画笔位置，用于连线
   var historyRef = useRef([]);
+  var redoRef = useRef([]);
   var cursorRef = useRef({x:-100, y:-100, visible:false});
+  var spaceRef = useRef(false);  // 空格键是否按下
+  var panDragRef = useRef(false);  // 空格+拖拽平移中
+  var panStartRef = useRef({x:0, y:0});
+  var [spacePan, setSpacePan] = useState(false);  // 空格平移模式，用于 CSS class 切换
 
   // 初始化：加载结果图到 canvas，加载原图到 source
   useEffect(function(){
@@ -248,18 +253,25 @@ function EditCanvas({resultUrl, thumbUrl, zoom, pan, editMode, brushSize, onSave
     var ctx = canvas.getContext('2d');
     historyRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
     if(historyRef.current.length > 30) historyRef.current.shift();
+    redoRef.current = [];
   }
 
   function handlePointerDown(e){
     if(editMode === 'none') return;
     e.preventDefault();
+    // 空格+拖拽 = 平移模式
+    if(spaceRef.current){
+      panDragRef.current = true;
+      panStartRef.current = {x: e.clientX - pan.x, y: e.clientY - pan.y};
+      e.currentTarget.classList.add('space-dragging');
+      return;
+    }
     saveSnapshot();
     drawingRef.current = true;
     lastPosRef.current = null;
     applyBrush(e);
   }
   function handlePointerMove(e){
-    // 更新画笔光标位置
     var canvas = canvasRef.current;
     if(!canvas) return;
     var container = canvas.parentElement;
@@ -269,6 +281,11 @@ function EditCanvas({resultUrl, thumbUrl, zoom, pan, editMode, brushSize, onSave
       y: e.clientY - rect.top,
       visible: true
     };
+    // 空格+拖拽平移中
+    if(panDragRef.current){
+      setPan({x: e.clientX - panStartRef.current.x, y: e.clientY - panStartRef.current.y});
+      return;
+    }
     // 重绘光标
     var cursorEl = container.querySelector('.brush-cursor');
     if(cursorEl){
@@ -285,11 +302,15 @@ function EditCanvas({resultUrl, thumbUrl, zoom, pan, editMode, brushSize, onSave
     if(!drawingRef.current) return;
     applyBrush(e);
   }
-  function handlePointerUp(){
+  function handlePointerUp(e){
     drawingRef.current = false;
+    panDragRef.current = false;
+    e.currentTarget.classList.remove('space-dragging');
   }
-  function handlePointerLeave(){
+  function handlePointerLeave(e){
     drawingRef.current = false;
+    e.currentTarget.classList.remove('space-dragging');
+    panDragRef.current = false;
     cursorRef.current.visible = false;
     var canvas = canvasRef.current;
     if(canvas){
@@ -300,11 +321,24 @@ function EditCanvas({resultUrl, thumbUrl, zoom, pan, editMode, brushSize, onSave
 
   function handleUndo(){
     if(historyRef.current.length <= 1) return;
-    historyRef.current.pop();
-    var prev = historyRef.current[historyRef.current.length - 1];
     var canvas = canvasRef.current;
     var ctx = canvas.getContext('2d');
+    var current = historyRef.current.pop();
+    redoRef.current.push(current);
+    if(redoRef.current.length > 30) redoRef.current.shift();
+    var prev = historyRef.current[historyRef.current.length - 1];
     ctx.putImageData(prev, 0, 0);
+    lastPosRef.current = null;
+  }
+
+  function handleRedo(){
+    if(redoRef.current.length === 0) return;
+    var canvas = canvasRef.current;
+    var ctx = canvas.getContext('2d');
+    var next = redoRef.current.pop();
+    historyRef.current.push(next);
+    if(historyRef.current.length > 30) historyRef.current.shift();
+    ctx.putImageData(next, 0, 0);
     lastPosRef.current = null;
   }
 
@@ -342,8 +376,56 @@ function EditCanvas({resultUrl, thumbUrl, zoom, pan, editMode, brushSize, onSave
     return function(){ document.removeEventListener('pointermove', onDocMove); };
   }, [editMode]);
 
+  // 全局键盘快捷键：Ctrl+Z 撤销，Ctrl+Y / Ctrl+Shift+Z 重做，Space 平移
+  useEffect(function(){
+    if(editMode === 'none') return;
+    function onKeyDown(e){
+      if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      // 空格键：切换平移模式
+      if(e.code === 'Space' && !spaceRef.current){
+        e.preventDefault();
+        spaceRef.current = true;
+        setSpacePan(true);
+        var container = canvasRef.current ? canvasRef.current.parentElement : null;
+        var cursorEl = container ? container.querySelector('.brush-cursor') : null;
+        if(cursorEl) cursorEl.style.opacity = '0';
+        return;
+      }
+      var isCtrl = e.ctrlKey || e.metaKey;
+      if(!isCtrl) return;
+      if(e.key === 'z' || e.key === 'Z'){
+        if(e.shiftKey){
+          e.preventDefault();
+          handleRedo();
+        } else {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if(e.key === 'y' || e.key === 'Y'){
+        e.preventDefault();
+        handleRedo();
+      }
+    }
+    function onKeyUp(e){
+      if(e.code === 'Space'){
+        spaceRef.current = false;
+        panDragRef.current = false;
+        setSpacePan(false);
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    return function(){
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keyup', onKeyUp);
+      spaceRef.current = false;
+      panDragRef.current = false;
+      setSpacePan(false);
+    };
+  }, [editMode, pan]);
+
   return <>
-    <div className="absolute inset-0 z-20" style={{cursor:'none'}}
+    <div className={"absolute inset-0 z-20"+(spacePan?' space-pan':'')}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -371,7 +453,8 @@ function EditCanvas({resultUrl, thumbUrl, zoom, pan, editMode, brushSize, onSave
       <input type="range" min="5" max="100" value={brushSize} onChange={function(e){onCancel('size', parseInt(e.target.value))}} className="w-16 h-1 accent-purple-500" title={'画笔大小: ' + brushSize + 'px'}/>
       <span className="text-[10px] text-gray-400 w-7">{brushSize}</span>
       <div className="w-px h-4 bg-gray-200 mx-0.5"/>
-      <button onClick={handleUndo} className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 transition-all" title="撤销">↩</button>
+      <button onClick={handleUndo} className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 transition-all" title="撤销 (Ctrl+Z)">↩</button>
+      <button onClick={handleRedo} className="px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 transition-all" title="重做 (Ctrl+Y)">↪</button>
       <button onClick={handleSave} className="px-2.5 py-1 rounded text-xs font-medium bg-purple-500 text-white hover:bg-purple-600 transition-all">完成</button>
       <button onClick={function(){onCancel('cancel')}} className="px-2.5 py-1 rounded text-xs text-gray-500 hover:bg-gray-100 transition-all">取消</button>
     </div>
@@ -460,7 +543,7 @@ function PreviewPanel({activeImg, viewMode, setViewMode, sliderPos, setSliderPos
         onMouseUp={inEdit ? undefined : handlePanUp}
         onMouseLeave={inEdit ? undefined : handlePanUp}>
         <img src={activeImg.resultUrl} alt="" style={{...imgStyle, display: inEdit ? 'none' : undefined}} draggable={false}/>
-        {inEdit && <EditCanvas resultUrl={activeImg.resultUrl} thumbUrl={activeImg.thumb} zoom={zoom} pan={pan} editMode={editMode} brushSize={brushSize} onSave={function(blob,url){upd(activeImg.id,{resultBlob:blob,resultUrl:url}); onEditAction('done');}} onCancel={onEditAction}/>}
+        {inEdit && <EditCanvas resultUrl={activeImg.resultUrl} thumbUrl={activeImg.thumb} zoom={zoom} pan={pan} setPan={setPan} editMode={editMode} brushSize={brushSize} onSave={function(blob,url){upd(activeImg.id,{resultBlob:blob,resultUrl:url}); onEditAction('done');}} onCancel={onEditAction}/>}
       </div>
       <ZoomControls zoom={zoom} setZoom={setZoom} handleZoomReset={handleZoomReset}/>
       {!inEdit && <button onClick={() => dlOne(activeImg, '_remove', _exportFormat)} className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-purple-500 text-white text-xs font-medium hover:bg-purple-600 shadow-lg flex items-center gap-1.5 z-10 transition-all"><Download/>下载 PNG</button>}

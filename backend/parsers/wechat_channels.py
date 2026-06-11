@@ -1,16 +1,30 @@
 """微信视频号解析器"""
 
-import json
+import os
 import re
+import json
+import random
+import time
 import logging
+import asyncio
 from typing import Dict, Any, Optional
+from urllib.parse import urlparse, parse_qs, quote
 
 import httpx
 
-from ._utils import _make_info, _empty_result, _ok, _follow_redirects
+from ._utils import _make_info, _empty_result, _ok
+
+YUANBAO_COOKIE = os.environ.get("YUANBAO_COOKIE", "")
+
+
+def update_cookie(new_cookie: str):
+    """运行时更新 cookie（热更新，无需重启）"""
+    global YUANBAO_COOKIE
+    YUANBAO_COOKIE = new_cookie
+    os.environ["YUANBAO_COOKIE"] = new_cookie
+    logger.info("[视频号] Yuanbao cookie 已更新")
 
 logger = logging.getLogger(__name__)
-
 
 DOMAINS = ["channels.weixin.qq.com", "weixin.qq.com"]
 
@@ -21,9 +35,17 @@ _CHANNELS_PATTERNS = [
     r'feedId=([a-f0-9]+)',
 ]
 
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+# Yuanbao API（主方案）
+YUANBAO_API = 'https://yuanbao.tencent.com/api/weixin/get_parse_result'
+# Cloudflare Worker API（备用方案）
+WORKER_API = 'https://sph.litao.workers.dev/api/fetch_video_profile'
+# get_feed_info API
+FEED_INFO_API = 'https://channels.weixin.qq.com/finder-preview/api/feed/get_feed_info'
+
 
 def _parse_count(s) -> int:
-    """解析带万字/suffix 的计数字符串为整数"""
     if not s:
         return 0
     s = str(s).replace(',', '')
@@ -35,319 +57,367 @@ def _parse_count(s) -> int:
         return 0
 
 
-def parse_video_info(json_str: str) -> Dict[str, Any]:
-    """
-    解析用户粘贴的视频信息
-
-    支持多种输入格式：
-    1. JSON 字符串
-    2. 包含 URL 的文本
-    3. 视频号链接
-    """
-    # 尝试解析 JSON
-    try:
-        data = json.loads(json_str)
-        return _parse_json_data(data)
-    except json.JSONDecodeError:
-        pass
-
-    # 尝试从文本中提取视频 URL
-    url_match = re.search(
-        r'https?://[^\s"\'<>]*(?:mp4|m3u8|video)[^\s"\'<>]*',
-        json_str,
-        re.IGNORECASE
-    )
-    if url_match:
-        video_url = url_match.group(0)
-        return _ok(_make_info(
-            id="wx_video",
-            platform="wechat_channels",
-            title="微信视频号",
-            author="未知作者",
-            author_avatar="",
-            cover="",
-            duration=0,
-            video_url=video_url,
-            video_url_no_watermark=video_url,
-            create_time=0,
-            digg_count=0,
-            comment_count=0,
-            share_count=0,
-        ))
-
-    # 尝试提取视频号链接
-    link_match = re.search(
-        r'https?://channels\.weixin\.qq\.com/web/pages/feed/[a-f0-9]+',
-        json_str
-    )
-    if link_match:
-        return {
-            "success": False,
-            "message": "检测到视频号链接，但需要在微信中打开",
-            "data": None,
-        }
-
-    return _empty_result("无法解析，请粘贴视频直链")
-
-
-def _parse_json_data(data: dict) -> Dict[str, Any]:
-    """解析 JSON 格式的视频信息"""
-    video_id = data.get("id", "") or data.get("videoId", "")
-    title = data.get("title", "") or data.get("desc", "") or "微信视频号"
-    video_url = data.get("url", "") or data.get("videoUrl", "") or data.get("src", "")
-    decrypt_key = data.get("key", "") or data.get("decryptKey", "") or data.get("videoEncKey", "")
-    cover_url = data.get("coverUrl", "") or data.get("cover", "") or data.get("poster", "")
-    duration = data.get("duration", 0)
-    author = data.get("nickname", "") or data.get("author", "") or data.get("userName", "")
-
-    if not video_url:
-        return _empty_result("未获取到视频地址，请确保视频正在播放")
-
-    # 加密视频使用 wx:// 前缀
-    if decrypt_key:
-        video_url_final = f"wx://{video_url}|{decrypt_key}"
-    else:
-        video_url_final = video_url
-
-    return _ok(_make_info(
-        id=video_id or "wx_video",
-        platform="wechat_channels",
-        title=title,
-        author=author or "未知作者",
-        author_avatar="",
-        cover=cover_url,
-        duration=int(duration) if duration else 0,
-        video_url=video_url_final,
-        video_url_no_watermark=video_url,
-        create_time=0,
-        digg_count=0,
-        comment_count=0,
-        share_count=0,
-    ))
-
-
-def get_usage_guide() -> str:
-    """返回使用说明"""
-    return """
-【微信视频号说明】
-
-微信视频号的视频仅限在微信 App 内播放，公开 API 不提供视频直链。
-本工具可解析视频号的元数据（标题、作者、封面等），但无法直接下载视频。
-
-如需保存视频，可使用手机录屏功能。
-"""
+def _generate_rid() -> str:
+    ts_hex = hex(int(time.time()))[2:]
+    rand_hex = ''.join([hex(random.randint(0, 15))[2:] for _ in range(8)])
+    return f'{ts_hex}-{rand_hex}'
 
 
 async def parse(url: str) -> Dict[str, Any]:
     """主解析入口"""
-    # 判断输入类型
     if url.startswith("{") or url.startswith("["):
         return parse_video_info(url)
     elif "channels.weixin.qq.com" in url:
-        return await parse_channels_url(url)
+        return await _parse_url(url)
     elif "weixin.qq.com/sph/" in url:
-        return await parse_sph_url(url)
+        return await _parse_url(url)
     elif url.startswith("http") and ("mp4" in url or "m3u8" in url or "video" in url):
-        # 直接是视频 URL
         return _ok(_make_info(
-            id="wx_video",
-            platform="wechat_channels",
-            title="微信视频号",
-            author="未知作者",
-            author_avatar="",
-            cover="",
-            duration=0,
-            video_url=url,
-            video_url_no_watermark=url,
-            create_time=0,
-            digg_count=0,
-            comment_count=0,
-            share_count=0,
+            id="wx_video", platform="wechat_channels", title="微信视频号",
+            video_url=url, video_url_no_watermark=url,
         ))
     else:
-        return {
-            "success": False,
-            "message": "请输入视频直链或使用抓包工具获取",
-            "data": None,
-            "guide": get_usage_guide(),
-        }
+        return _empty_result("请输入视频号分享链接")
 
 
-def parse_url(url: str) -> Dict[str, Any]:
-    """解析视频号链接"""
-    video_id = None
-    for pattern in _CHANNELS_PATTERNS:
-        match = re.search(pattern, url)
-        if match:
-            video_id = match.group(1)
-            break
-
+async def _parse_url(url: str) -> Dict[str, Any]:
+    """解析视频号链接：Yuanbao API → Worker API → get_feed_info（兜底）"""
+    video_id = _extract_video_id(url)
     if not video_id:
-        return _empty_result("无法识别视频号链接")
+        return _empty_result("无法从链接中提取视频ID")
 
-    return {
-        "success": False,
-        "message": f"检测到视频号内容 (ID: {video_id})，但需要配合抓包工具获取视频直链",
-        "data": None,
-        "hint": get_usage_guide(),
-    }
+    logger.info(f"[视频号] 解析 video_id: {video_id}")
 
+    # 方案 1: Yuanbao API（需要 cookie）
+    if YUANBAO_COOKIE:
+        result = await _fetch_via_yuanbao(url)
+        if result and result.get("success"):
+            logger.info(f"[视频号] Yuanbao 解析成功")
+            return result
+        logger.warning(f"[视频号] Yuanbao 解析失败，尝试 Worker")
 
-async def parse_channels_url(url: str) -> Dict[str, Any]:
-    """异步解析 channels.weixin.qq.com 链接（获取元数据，视频直链不可用）"""
-    video_id = None
-    for pattern in _CHANNELS_PATTERNS:
-        match = re.search(pattern, url)
-        if match:
-            video_id = match.group(1)
-            break
-
-    if not video_id:
-        return _empty_result("无法识别视频号链接")
-
-    metadata = await fetch_video_metadata(video_id)
-
-    if metadata:
-        feed_info = metadata.get('feedInfo', {})
-        author_info = metadata.get('authorInfo', {})
-
-        # 微信视频号视频直链不可用，仅返回元数据
-        return _ok(_make_info(
-            id=video_id,
-            platform="wechat_channels",
-            title=feed_info.get('description', '微信视频号') if feed_info else '微信视频号',
-            author=author_info.get('nickname', '未知作者') if author_info else '未知作者',
-            author_avatar=author_info.get('headImgUrl', '') if author_info else '',
-            cover=feed_info.get('coverUrl', '') if feed_info else '',
-            duration=0,
-            video_url="",
-            video_url_no_watermark="",
-            create_time=feed_info.get('createtime', 0) if feed_info else 0,
-            digg_count=_parse_count(feed_info.get('likeCountFmt', '0')) if feed_info else 0,
-            comment_count=_parse_count(feed_info.get('commentCountFmt', '0')) if feed_info else 0,
-            share_count=_parse_count(feed_info.get('forwardCountFmt', '0')) if feed_info else 0,
-        ))
-    else:
-        return {
-            "success": False,
-            "message": f"已识别为视频号链接 (ID: {video_id})，但获取元数据失败。请稍后重试或使用抓包工具",
-            "data": None,
-            "hint": get_usage_guide(),
-        }
-
-
-async def parse_sph_url(url: str) -> Dict[str, Any]:
-    """
-    解析视频号分享链接 (weixin.qq.com/sph/xxxxx)
-
-    1. 跟踪重定向获取最终 URL
-    2. 提取 video_id
-    3. 调用内部 API 获取元数据
-    4. 返回元数据（视频直链不可用）
-    """
+    # 方案 2: Worker API（备用）
+    worker_task = asyncio.wait_for(_fetch_via_worker(url), timeout=12.0)
     try:
-        # 1. 跟踪重定向获取最终 URL
-        final_url = await _follow_redirects(url, timeout=10.0)
-        logger.info(f"[视频号] 重定向后 URL: {final_url}")
+        worker_result = await worker_task
+        if worker_result and worker_result.get("success"):
+            logger.info(f"[视频号] Worker 解析成功")
+            return worker_result
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.warning(f"[视频号] Worker 失败: {e}")
 
-        # 2. 提取 video_id
-        video_id = None
+    # 方案 3: get_feed_info 短链接（仅元数据，无视频 URL）
+    feed_data = await _get_feed_info_short(video_id)
+    if feed_data:
+        result = _build_result_from_feed(video_id, feed_data)
+        if result["success"]:
+            logger.info(f"[视频号] get_feed_info 元数据成功（无视频直链）")
+            return result
 
-        # 从 channels.weixin.qq.com/finder-preview/pages/sph?id=xxx 提取
-        sph_match = re.search(r'sph\?id=([a-zA-Z0-9]+)', final_url)
-        if sph_match:
-            video_id = sph_match.group(1)
+    return _empty_result("解析失败。请确保 Yuanbao cookie 有效，或稍后重试")
 
-        # 从 weixin.qq.com/sph/xxx 提取
-        if not video_id:
-            sph_match = re.search(r'sph/([a-zA-Z0-9]+)', url)
-            if sph_match:
-                video_id = sph_match.group(1)
 
-        if not video_id:
-            return _empty_result("无法从链接中提取视频ID")
+async def _fetch_via_yuanbao(url: str) -> Optional[Dict[str, Any]]:
+    """Yuanbao 两步解析：Step1 获取 token/eid → Step2 获取视频 URL"""
+    try:
+        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+            # Step 1: Yuanbao API → playable_url
+            payload = {'type': 'video_channel_url', 'url': url, 'scene': 1}
+            headers = {
+                'accept': 'application/json, text/plain, */*',
+                'content-type': 'application/json',
+                'origin': 'https://yuanbao.tencent.com',
+                'referer': 'https://yuanbao.tencent.com/chat/naQivTmsDa/cf4d0079-ed1b-4c55-a3f3-2ca1379727d1',
+                'user-agent': UA,
+                'cookie': YUANBAO_COOKIE,
+            }
 
-        logger.info(f"[视频号] 提取到 video_id: {video_id}")
+            resp1 = await client.post(YUANBAO_API, json=payload, headers=headers)
+            if resp1.status_code != 200:
+                logger.warning(f"[视频号] Yuanbao API 状态码: {resp1.status_code}")
+                return None
 
-        # 3. 调用 API 获取元数据
-        metadata = await fetch_video_metadata(video_id)
+            data1 = resp1.json()
+            if data1.get('code') != 0:
+                logger.warning(f"[视频号] Yuanbao API 错误: {data1.get('msg')}")
+                return None
 
-        if metadata:
-            feed_info = metadata.get('feedInfo', {})
-            author_info = metadata.get('authorInfo', {})
+            parse_data = data1.get('data', {})
+            playable_url = parse_data.get('playable_url', '')
+            export_id_raw = parse_data.get('wx_export_id', '')
 
-            # 微信视频号视频直链不可用，仅返回元数据
+            if not playable_url and not export_id_raw:
+                logger.warning("[视频号] Yuanbao 返回数据为空")
+                return None
+
+            # 从 playable_url 提取 token 和 eid
+            general_token = ''
+            export_id = ''
+            if playable_url:
+                parsed = urlparse(playable_url)
+                params = parse_qs(parsed.query)
+                general_token = params.get('token', [''])[0]
+                export_id = params.get('eid', [''])[0]
+
+            if not export_id:
+                export_id = export_id_raw
+
+            if not general_token or not export_id:
+                logger.warning(f"[视频号] 无法提取 token/eid, playable_url: {playable_url[:100]}")
+                return None
+
+            # Step 2: get_feed_info with exportId + generalToken
+            rid = _generate_rid()
+            feed_payload = {'baseReq': {'generalToken': general_token}, 'exportId': export_id}
+            referer = (
+                f'https://channels.weixin.qq.com/finder-preview/pages/feed'
+                f'?entry_card_type=48&comment_scene=39&appid=0'
+                f'&token={quote(general_token)}&entry_scene=0&eid={quote(export_id)}'
+            )
+            feed_headers = {
+                'Accept': 'application/json, text/plain, */*',
+                'Content-Type': 'application/json',
+                'Origin': 'https://channels.weixin.qq.com',
+                'Referer': referer,
+                'User-Agent': UA,
+            }
+
+            api_url = f'{FEED_INFO_API}?_rid={rid}&_pageUrl=https%3A%2F%2Fchannels.weixin.qq.com%2Ffinder-preview%2Fpages%2Ffeed'
+            resp2 = await client.post(api_url, json=feed_payload, headers=feed_headers)
+            data2 = resp2.json()
+
+            if data2.get('errCode') != 0:
+                logger.warning(f"[视频号] get_feed_info 错误: {data2.get('errMsg')}")
+                return None
+
+            return _build_full_result(data2.get('data', {}), url)
+
+    except Exception as e:
+        logger.error(f"[视频号] Yuanbao 解析异常: {e}")
+        return None
+
+
+def _clean_video_url(video_url: str) -> str:
+    """精简视频 URL，只保留 encfilekey 和 token（核心鉴权参数）"""
+    if not video_url:
+        return ''
+    try:
+        parsed = urlparse(video_url)
+        encfilekey = parsed.query.split('encfilekey=')[1].split('&')[0] if 'encfilekey=' in parsed.query else ''
+        token = parsed.query.split('token=')[1].split('&')[0] if 'token=' in parsed.query else ''
+        if encfilekey and token:
+            return f'{parsed.scheme}://{parsed.netloc}{parsed.path}?encfilekey={encfilekey}&token={token}'
+    except Exception:
+        pass
+    return video_url
+
+
+def _build_full_result(feed_data: dict, url: str) -> Dict[str, Any]:
+    """从 get_feed_info 完整响应构建结果（含视频 URL）"""
+    feed_info = feed_data.get('feedInfo', {})
+    author_info = feed_data.get('authorInfo', {})
+
+    if not feed_info:
+        return _empty_result("API 返回数据为空")
+
+    # 提取视频 URL（优先 h264）
+    video_url = ''
+    h264 = feed_info.get('h264VideoInfo', {})
+    h265 = feed_info.get('h265VideoInfo', {})
+    if h264 and h264.get('videoUrl'):
+        video_url = h264['videoUrl']
+    elif h265 and h265.get('videoUrl'):
+        video_url = h265['videoUrl']
+    elif feed_info.get('videoUrl'):
+        video_url = feed_info['videoUrl']
+
+    # 精简 URL：只保留核心鉴权参数
+    video_url = _clean_video_url(video_url)
+
+    title = feed_info.get('description', '') or feed_info.get('title', '') or '微信视频号'
+    title = title.replace('\n', ' ').strip()
+    if len(title) > 200:
+        title = title[:200] + '...'
+
+    author = author_info.get('nickname', '未知作者') if author_info else '未知作者'
+    video_id = _extract_video_id(url) or 'wx_video'
+
+    return _ok(_make_info(
+        id=video_id,
+        platform="wechat_channels",
+        title=title,
+        author=author,
+        author_avatar=author_info.get('headImgUrl', '') if author_info else '',
+        cover=feed_info.get('coverUrl', ''),
+        duration=0,
+        video_url=video_url,
+        video_url_no_watermark=video_url,
+        create_time=feed_info.get('createtime', 0),
+        digg_count=_parse_count(feed_info.get('likeCountFmt', '0')),
+        comment_count=_parse_count(feed_info.get('commentCountFmt', '0')),
+        share_count=_parse_count(feed_info.get('forwardCountFmt', '0')),
+    ))
+
+
+def _extract_video_id(url: str) -> Optional[str]:
+    """从 URL 中提取 video_id"""
+    m = re.search(r'sph/([a-zA-Z0-9]+)', url)
+    if m:
+        return m.group(1)
+    m = re.search(r'sph\?id=([a-zA-Z0-9]+)', url)
+    if m:
+        return m.group(1)
+    for pattern in _CHANNELS_PATTERNS:
+        m = re.search(pattern, url)
+        if m:
+            return m.group(1)
+    return None
+
+
+async def _fetch_via_worker(url: str) -> Optional[Dict[str, Any]]:
+    """通过 Worker API 获取视频直链和元数据（备用方案）"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+            resp = await client.post(
+                WORKER_API,
+                json={'url': url},
+                headers={'User-Agent': UA, 'Content-Type': 'application/json'},
+            )
+            if resp.status_code != 200:
+                logger.warning(f"[视频号] Worker API 返回 {resp.status_code}")
+                return None
+
+            body = resp.json()
+            if body.get('errCode') != 0:
+                logger.warning(f"[视频号] Worker API 错误: {body.get('errMsg')}")
+                return None
+
+            data = body.get('data', {})
+            feed_info = data.get('feedInfo', {})
+            author_info = data.get('authorInfo', {})
+
+            if not feed_info:
+                return None
+
+            video_url = ''
+            h264 = feed_info.get('h264VideoInfo', {})
+            h265 = feed_info.get('h265VideoInfo', {})
+            if h264 and h264.get('videoUrl'):
+                video_url = h264['videoUrl']
+            elif h265 and h265.get('videoUrl'):
+                video_url = h265['videoUrl']
+            elif feed_info.get('videoUrl'):
+                video_url = feed_info['videoUrl']
+
+            title = feed_info.get('description', '') or '微信视频号'
+            title = title.replace('\n', ' ').strip()
+            if len(title) > 200:
+                title = title[:200] + '...'
+
+            author = author_info.get('nickname', '未知作者') if author_info else '未知作者'
+
             return _ok(_make_info(
-                id=video_id,
+                id=_extract_video_id(url) or 'wx_video',
                 platform="wechat_channels",
-                title=feed_info.get('description', '微信视频号'),
-                author=author_info.get('nickname', '未知作者'),
-                author_avatar=author_info.get('headImgUrl', ''),
+                title=title,
+                author=author,
+                author_avatar=author_info.get('headImgUrl', '') if author_info else '',
                 cover=feed_info.get('coverUrl', ''),
                 duration=0,
-                video_url="",
-                video_url_no_watermark="",
+                video_url=video_url,
+                video_url_no_watermark=video_url,
                 create_time=feed_info.get('createtime', 0),
                 digg_count=_parse_count(feed_info.get('likeCountFmt', '0')),
                 comment_count=_parse_count(feed_info.get('commentCountFmt', '0')),
                 share_count=_parse_count(feed_info.get('forwardCountFmt', '0')),
             ))
-        else:
-            # API 调用失败，返回提示信息
-            return {
-                "success": False,
-                "message": "已识别为视频号链接，但获取元数据失败。请稍后重试或使用抓包工具",
-                "data": None,
-                "hint": get_usage_guide(),
-            }
 
     except Exception as e:
-        logger.error(f"[视频号] 解析失败: {e}")
-        return {
-            "success": False,
-            "message": f"处理分享链接失败: {str(e)}",
-            "data": None,
-            "hint": get_usage_guide(),
-        }
+        logger.error(f"[视频号] Worker API 调用失败: {e}")
+        return None
 
 
-async def fetch_video_metadata(video_id: str) -> Optional[Dict[str, Any]]:
-    """
-    调用微信内部 API 获取视频元数据
-
-    注意：微信视频号的 get_feed_info API 不返回视频播放直链，
-    视频 URL 仅在微信 App 内可用。此函数获取元数据（标题、作者、封面等）。
-    """
-    ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-
-    api_headers = {
-        'User-Agent': ua,
+async def _get_feed_info_short(video_id: str) -> Optional[dict]:
+    """调用 get_feed_info API 获取视频元数据（仅短链接模式，不含视频 URL）"""
+    headers = {
+        'User-Agent': UA,
         'Content-Type': 'application/json',
         'Referer': f'https://channels.weixin.qq.com/finder-preview/pages/sph?id={video_id}',
         'Origin': 'https://channels.weixin.qq.com',
     }
 
-    result_data = {}
-
     try:
         async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
-            # 访问页面建立会话
-            page_url = f'https://channels.weixin.qq.com/finder-preview/pages/sph?id={video_id}'
-            await client.get(page_url, headers={'User-Agent': ua})
+            await client.get(
+                f'https://channels.weixin.qq.com/finder-preview/pages/sph?id={video_id}',
+                headers={'User-Agent': UA}
+            )
 
-            # 调用 get_feed_info 获取元数据
-            feed_api = 'https://channels.weixin.qq.com/finder-preview/api/feed/get_feed_info'
-            feed_payload = {'baseReq': {'generalToken': ''}, 'shortUri': video_id}
-            feed_resp = await client.post(feed_api, json=feed_payload, headers=api_headers)
-            feed_data = feed_resp.json()
+            payload = {'baseReq': {'generalToken': ''}, 'shortUri': video_id}
+            resp = await client.post(FEED_INFO_API, json=payload, headers=headers)
+            data = resp.json()
 
-            if feed_data.get('errCode') == 0:
-                logger.info(f"[视频号] get_feed_info 成功: {video_id}")
-                result_data = feed_data.get('data', {})
+            if data.get('errCode') == 0:
+                return data.get('data', {})
             else:
-                logger.warning(f"[视频号] get_feed_info 返回错误: {feed_data.get('errMsg')}")
+                logger.warning(f"[视频号] get_feed_info 错误: {data.get('errMsg')}")
+                return None
 
     except Exception as e:
         logger.error(f"[视频号] API 调用失败: {e}")
+        return None
 
-    return result_data if result_data else None
+
+def _build_result_from_feed(video_id: str, feed_data: dict) -> Dict[str, Any]:
+    """从 get_feed_info 短链接响应构建解析结果（仅元数据）"""
+    feed_info = feed_data.get('feedInfo', {})
+    author_info = feed_data.get('authorInfo', {})
+
+    if not feed_info:
+        return _empty_result("API 返回数据为空")
+
+    title = feed_info.get('description', '') or feed_info.get('title', '') or '微信视频号'
+    title = title.replace('\n', ' ').strip()
+    author = author_info.get('nickname', '未知作者') if author_info else '未知作者'
+
+    return _ok(_make_info(
+        id=video_id,
+        platform="wechat_channels",
+        title=title,
+        author=author,
+        author_avatar=author_info.get('headImgUrl', '') if author_info else '',
+        cover=feed_info.get('coverUrl', ''),
+        duration=0,
+        video_url="",
+        video_url_no_watermark="",
+        create_time=feed_info.get('createtime', 0),
+        digg_count=_parse_count(feed_info.get('likeCountFmt', '0')),
+        comment_count=_parse_count(feed_info.get('commentCountFmt', '0')),
+        share_count=_parse_count(feed_info.get('forwardCountFmt', '0')),
+    ))
+
+
+def parse_video_info(json_str: str) -> Dict[str, Any]:
+    """解析用户粘贴的视频信息 JSON"""
+    try:
+        data = json.loads(json_str)
+    except json.JSONDecodeError:
+        url_match = re.search(r'https?://[^\s"\'<>]*(?:mp4|m3u8|video)[^\s"\'<>]*', json_str, re.IGNORECASE)
+        if url_match:
+            return _ok(_make_info(
+                id="wx_video", platform="wechat_channels", title="微信视频号",
+                video_url=url_match.group(0), video_url_no_watermark=url_match.group(0),
+            ))
+        return _empty_result("无法解析，请粘贴视频号链接或视频直链")
+
+    video_url = data.get("url", "") or data.get("videoUrl", "") or data.get("src", "")
+    if not video_url:
+        return _empty_result("未获取到视频地址")
+
+    return _ok(_make_info(
+        id=data.get("id", "wx_video"), platform="wechat_channels",
+        title=data.get("title", "") or data.get("desc", "") or "微信视频号",
+        author=data.get("nickname", "") or data.get("author", ""),
+        cover=data.get("coverUrl", "") or data.get("cover", ""),
+        video_url=video_url, video_url_no_watermark=video_url,
+    ))

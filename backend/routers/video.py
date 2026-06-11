@@ -8,6 +8,7 @@ import logging
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
 from parsers import parse_link, batch_parse
 from parsers._utils import _is_safe_url, _extract_url
@@ -317,3 +318,26 @@ async def download_video(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
+
+
+# ─── Cookie 管理 ──────────────────────────────────────
+
+class CookieUpdateRequest(BaseModel):
+    cookie: str
+
+
+@router.post("/api/wechat-cookie")
+async def update_wechat_cookie(req: CookieUpdateRequest):
+    """热更新视频号解析 cookie（无需重启服务）"""
+    from parsers.wechat_channels import update_cookie
+    if not req.cookie.strip():
+        raise HTTPException(status_code=400, detail="cookie 不能为空")
+    update_cookie(req.cookie.strip())
+    return {"success": True, "message": "cookie 已更新"}
+
+
+@router.get("/api/wechat-cookie/status")
+async def cookie_status():
+    """检查视频号 cookie 是否已配置"""
+    from parsers.wechat_channels import YUANBAO_COOKIE
+    return {"configured": bool(YUANBAO_COOKIE), "length": len(YUANBAO_COOKIE)}
