@@ -62,6 +62,55 @@ a { text-decoration: none; color: inherit; }
 .nav-item:hover { color: var(--text-primary); }
 .nav-item.active { font-weight: 600; }
 .nav-item .nav-icon { font-size: 19px; width: 22px; text-align: center; }
+
+/* ─── Collapsible Navigation ─── */
+.nav-label-toggle {
+    cursor: pointer; user-select: none;
+    display: flex; align-items: center; gap: 6px;
+    transition: color 0.2s;
+}
+.nav-label-toggle:hover { color: var(--text-primary); }
+.collapse-icon {
+    font-size: 10px; width: 14px; text-align: center; flex-shrink: 0;
+    display: inline-block; transition: transform 0.25s ease;
+}
+.collapse-icon.open { transform: rotate(90deg); }
+.collapse-wrap {
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.25s ease;
+}
+.collapse-wrap.collapsed {
+    max-height: 0 !important;
+    opacity: 0;
+}
+.nav-section { margin-top: 2px; }
+.nav-section-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-radius: 10px;
+    font-size: 16px; color: var(--text-secondary);
+    cursor: pointer; user-select: none;
+    transition: all 0.2s; font-family: inherit;
+}
+.nav-section-header:hover { color: var(--text-primary); }
+.nav-section-header .nav-icon { font-size: 19px; width: 22px; text-align: center; }
+[data-theme="light"] .nav-section-header:hover {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+}
+[data-theme="dark"] .nav-section-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #eeeef2;
+}
+.nav-sub-item {
+    padding-left: 44px !important;
+    font-size: 15px !important;
+}
+.nav-sub-item .sub-icon {
+    font-size: 14px !important;
+    width: 16px !important;
+    color: var(--text-muted);
+}
+
 .sidebar-bottom { padding: 14px 10px; }
 .theme-btn {
     display: flex; align-items: center; gap: 10px;
@@ -148,6 +197,7 @@ a { text-decoration: none; color: inherit; }
 .tag-purple { background: rgba(139,92,246,0.1); color: #a78bfa; }
 .tag-orange { background: rgba(245,158,11,0.1); color: #fbbf24; }
 .tag-pink { background: rgba(236,72,153,0.1); color: #f472b6; }
+.tag-indigo { background: rgba(99,102,241,0.1); color: #818cf8; }
 .tool-card.hidden { display: none; }
 
 /* ─── Empty State ─── */
@@ -414,6 +464,7 @@ a { text-decoration: none; color: inherit; }
 [data-theme="dark"] .tag-purple { background: rgba(139,92,246,0.15); color: #c4b5fd; }
 [data-theme="dark"] .tag-orange { background: rgba(245,158,11,0.15); color: #fcd34d; }
 [data-theme="dark"] .tag-pink { background: rgba(236,72,153,0.15); color: #f9a8d4; }
+[data-theme="dark"] .tag-indigo { background: rgba(99,102,241,0.15); color: #a5b4fc; }
 [data-theme="dark"] .right-panel {
     background: rgba(16, 16, 26, 0.78);
     border-left: 1px solid rgba(255, 255, 255, 0.04);
@@ -489,44 +540,69 @@ a { text-decoration: none; color: inherit; }
             <h1>小小工具箱</h1>
         </div>
         <nav class="sidebar-nav">
-            <div class="nav-label">工具分类</div>
-            <button class="nav-item active" data-filter="all">
-                <span class="nav-icon">🧰</span>
-                全部工具
-            </button>
-            <button class="nav-item" data-filter="video">
-                <span class="nav-icon">🎬</span>
-                视频工具
-            </button>
-            <button class="nav-item" data-filter="image">
-                <span class="nav-icon">🖼️</span>
-                图片工具
-            </button>
-            <div class="nav-label" style="margin-top:12px">快捷入口</div>
-            <a class="nav-item" href="video-tool/">
-                <span class="nav-icon">⬇️</span>
-                视频解析下载
-            </a>
-            <a class="nav-item" href="image-tool/">
-                <span class="nav-icon">🖼️</span>
-                图片批量处理
-            </a>
-            <a class="nav-item" href="bg-remover/">
-                <span class="nav-icon">✂️</span>
-                智能抠图
-            </a>
-            <a class="nav-item" href="image-composite/">
-                <span class="nav-icon">🎨</span>
-                溶图合成
-            </a>
-            <a class="nav-item" href="text-remover/">
-                <span class="nav-icon">T</span>
-                智能去文字
-            </a>
-            <a class="nav-item" href="wx-video-parser/">
-                <span class="nav-icon">📹</span>
-                视频号解析
-            </a>
+            <!-- 工具分类：可折叠头部 -->
+            <div class="nav-label nav-label-toggle" data-target="cat-all">
+                <span class="collapse-icon open">▶</span>
+                工具分类
+            </div>
+            <div class="collapse-wrap" id="cat-all">
+                <button class="nav-item active" data-filter="all">
+                    <span class="nav-icon">🧰</span>
+                    全部工具
+                </button>
+
+                <div class="nav-section">
+                    <div class="nav-section-header" data-target="cat-video">
+                        <span class="collapse-icon open">▶</span>
+                        <span class="nav-icon">🎬</span>
+                        视频工具
+                    </div>
+                    <div class="collapse-wrap" id="cat-video">
+                        <a class="nav-item nav-sub-item" href="video-tool/" data-filter="video">
+                            <span class="nav-icon sub-icon">•</span>
+                            视频解析下载
+                        </a>
+                        <a class="nav-item nav-sub-item" href="wx-video-parser/" data-filter="video">
+                            <span class="nav-icon sub-icon">•</span>
+                            视频号解析
+                        </a>
+                        <a class="nav-item nav-sub-item" href="transcript/" data-filter="video">
+                            <span class="nav-icon sub-icon">•</span>
+                            视频文案提取
+                        </a>
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-header" data-target="cat-image">
+                        <span class="collapse-icon open">▶</span>
+                        <span class="nav-icon">🖼️</span>
+                        图片工具
+                    </div>
+                    <div class="collapse-wrap" id="cat-image">
+                        <a class="nav-item nav-sub-item" href="image-tool/" data-filter="image">
+                            <span class="nav-icon sub-icon">•</span>
+                            图片批量处理
+                        </a>
+                        <a class="nav-item nav-sub-item" href="bg-remover/" data-filter="image">
+                            <span class="nav-icon sub-icon">•</span>
+                            智能抠图
+                        </a>
+                        <a class="nav-item nav-sub-item" href="image-composite/" data-filter="image">
+                            <span class="nav-icon sub-icon">•</span>
+                            溶图合成
+                        </a>
+                        <a class="nav-item nav-sub-item" href="text-remover/" data-filter="image">
+                            <span class="nav-icon sub-icon">•</span>
+                            智能去文字
+                        </a>
+                        <a class="nav-item nav-sub-item" href="watermark-tool/" data-filter="image">
+                            <span class="nav-icon sub-icon">•</span>
+                            暗水印检测
+                        </a>
+                    </div>
+                </div>
+            </div>
         </nav>
         <div class="sidebar-bottom">
             <button class="theme-btn" id="themeBtn">
@@ -628,6 +704,21 @@ a { text-decoration: none; color: inherit; }
                         <span class="tag tag-pink">智能修复</span>
                     </div>
                 </a>
+                <a class="tool-card" href="watermark-tool/" data-color="indigo" data-category="image" data-kw="暗水印 隐写 LSB DCT 水印检测 水印去除 steganography 水印分析">
+                    <div class="card-head">
+                        <div class="card-icon" style="background:rgba(99,102,241,0.12)">🛡</div>
+                        <div class="card-meta">
+                            <h4>暗水印检测</h4>
+                            <span class="badge">多算法检测</span>
+                        </div>
+                    </div>
+                    <div class="card-body">自动检测图片中的暗水印和隐写信息，支持 LSB、DCT、DWT、Alpha 通道等多种算法，一键去除水印。</div>
+                    <div class="card-foot">
+                        <span class="tag tag-indigo">LSB 隐写</span>
+                        <span class="tag tag-indigo">频域分析</span>
+                        <span class="tag tag-indigo">水印去除</span>
+                    </div>
+                </a>
                 <a class="tool-card" href="wx-video-parser/" data-color="blue" data-category="video" data-kw="视频号 微信视频号 wechat channels 解析 下载 分享链接">
                     <div class="card-head">
                         <div class="card-icon" style="background:rgba(59,130,246,0.12)">📹</div>
@@ -641,6 +732,21 @@ a { text-decoration: none; color: inherit; }
                         <span class="tag tag-blue">视频号</span>
                         <span class="tag tag-blue">微信</span>
                         <span class="tag tag-blue">下载</span>
+                    </div>
+                </a>
+                <a class="tool-card" href="transcript/" data-color="purple" data-category="video" data-kw="文案 提取 字幕 视频转文字 文案提取 ASR 语音识别 视频文案 抖音文案 转录 口播稿">
+                    <div class="card-head">
+                        <div class="card-icon" style="background:rgba(139,92,246,0.12)">📝</div>
+                        <div class="card-meta">
+                            <h4>视频文案提取</h4>
+                            <span class="badge">AI 语音识别</span>
+                        </div>
+                    </div>
+                    <div class="card-body">粘贴视频链接，自动提取文案内容。支持字幕提取和 AI 语音识别，覆盖抖音、TikTok、YouTube 等平台。</div>
+                    <div class="card-foot">
+                        <span class="tag tag-purple">字幕提取</span>
+                        <span class="tag tag-purple">语音识别</span>
+                        <span class="tag tag-purple">文案下载</span>
                     </div>
                 </a>
             </div>
@@ -660,10 +766,20 @@ a { text-decoration: none; color: inherit; }
                     <div class="tl-marker"></div>
                     <div class="tl-content">
                         <div class="tl-head">
+                            <span class="tl-date">06-15</span>
+                            <span class="tl-tag tl-tag-green">新增</span>
+                        </div>
+                        <div class="tl-text">视频文案提取工具上线，支持字幕提取与 AI 语音识别</div>
+                    </div>
+                </div>
+                <div class="tl-item">
+                    <div class="tl-marker"></div>
+                    <div class="tl-content">
+                        <div class="tl-head">
                             <span class="tl-date">06-05</span>
                             <span class="tl-tag tl-tag-purple">优化</span>
                         </div>
-                        <div class="tl-text">项目重构与性能优化</div>
+                        <div class="tl-text">项目重构，统一前端样式与主题系统</div>
                     </div>
                 </div>
                 <div class="tl-item">
@@ -673,7 +789,7 @@ a { text-decoration: none; color: inherit; }
                             <span class="tl-date">05-30</span>
                             <span class="tl-tag tl-tag-blue">V2.0</span>
                         </div>
-                        <div class="tl-text">AI 智能抠图、溶图合成上线</div>
+                        <div class="tl-text">AI 智能抠图、溶图合成、智能去文字上线</div>
                     </div>
                 </div>
                 <div class="tl-item">
@@ -766,6 +882,49 @@ allFilterBtns.forEach(btn => {
 sidebarNavItems.forEach(btn => {
     btn.addEventListener('click', () => setCategory(btn.dataset.filter));
 });
+
+// Collapsible sidebar navigation
+(function initCollapse() {
+    var store = function (key, val) { localStorage.setItem('sidebar.collapse.' + key, val); };
+    var load = function (key) { return localStorage.getItem('sidebar.collapse.' + key); };
+
+    document.querySelectorAll('[data-target]').forEach(function (trigger) {
+        var target = document.getElementById(trigger.getAttribute('data-target'));
+        if (!target) return;
+
+        var key = target.id;
+        var isCollapsed = load(key) === 'true';
+
+        // Apply initial state
+        target.classList.toggle('collapsed', isCollapsed);
+        target.style.maxHeight = isCollapsed ? '0' : target.scrollHeight + 'px';
+        trigger.querySelectorAll('.collapse-icon').forEach(function (ico) {
+            ico.classList.toggle('open', !isCollapsed);
+        });
+
+        // Toggle on click
+        trigger.addEventListener('click', function () {
+            var wasCollapsed = target.classList.contains('collapsed');
+            if (wasCollapsed) {
+                // Expand
+                target.classList.remove('collapsed');
+                target.style.maxHeight = target.scrollHeight + 'px';
+                store(key, 'false');
+            } else {
+                // Collapse — freeze current height before animating to 0
+                target.style.maxHeight = target.scrollHeight + 'px';
+                requestAnimationFrame(function () {
+                    target.classList.add('collapsed');
+                    target.style.maxHeight = '0';
+                    store(key, 'true');
+                });
+            }
+            trigger.querySelectorAll('.collapse-icon').forEach(function (ico) {
+                ico.classList.toggle('open', wasCollapsed);
+            });
+        });
+    });
+})();
 </script>
 </body>
 </html>

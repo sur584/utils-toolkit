@@ -8,6 +8,9 @@ __pycache__/
 
 # Downloads
 backend/downloads/
+
+# Transcript cache (generated during ASR processing)
+backend/transcript/cache/
 *.mp4
 *.part
 
@@ -16,9 +19,13 @@ python/
 
 # AI models (auto-downloaded, ~100MB+)
 models/
+models/hub/                   # HuggingFace / Whisper 模型缓存
 
 # Cache directory (auto-generated)
 cache/
+
+# History data (personal video history, do not commit)
+backend/history_data/
 
 # Backend logs
 backend/app.log
@@ -49,6 +56,3 @@ assets/
 .env
 *.env
 .env.local
-
-backend/downloads/*.mp4
-backend/downloads/*.part

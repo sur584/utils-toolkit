@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
 
-const tools = ['image-tool', 'bg-remover', 'image-composite', 'text-remover'];
+const tools = ['image-tool', 'bg-remover', 'image-composite', 'text-remover', 'watermark-tool'];
 
 export default defineConfig({
   plugins: [

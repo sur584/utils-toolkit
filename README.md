@@ -1,6 +1,6 @@
 # 小小工具箱
 
-一个轻量级的多功能在线工具集，包含视频解析下载、图片批量处理、AI 智能抠图、溶图合成等实用工具。
+一个轻量级的多功能在线工具集，包含视频解析下载、图片批量处理、AI 智能抠图、溶图合成、视频文案提取等实用工具。
 
 ## 包含工具
 
@@ -32,6 +32,12 @@
 - 批量套用模板，一键导出合成图片
 - 适用于电商产品图、社交媒体配图等场景
 - 详见 [溶图工具](/tools/image-composite/)
+
+### 📝 视频文案提取
+- 粘贴视频链接自动提取文案，支持字幕提取 + AI 语音识别（faster-whisper）
+- 支持抖音、B站、YouTube、TikTok 等主流平台
+- 支持本地 GPU 加速和云端 ASR 回退
+- 详见 [视频文案提取](/tools/transcript/)
 
 ## 使用方式
 
@@ -81,10 +87,14 @@ utils-toolkit/
 ├── app.bat / app.sh           # 一键启动脚本
 ├── launcher.py                # Python 启动器（统一依赖管理）
 ├── rebuild.bat                # 重新构建前端（修改源码后双击）
+├── build.bat                  # 构建前端脚本
+├── build_portable.py          # 便携版打包脚本
 ├── vite.config.js             # Vite 构建配置（多页面 + 构建后处理）
 ├── tailwind.config.js         # Tailwind CSS 配置
 ├── requirements.txt           # Python 依赖清单
+├── transcript-config.json     # 云端 ASR 提供商配置
 ├── models/                    # AI 模型文件（自动下载）
+├── cache/                     # 缓存目录
 ├── .gitignore
 │
 ├── src/                       # 前端源码（Vite 构建）
@@ -98,6 +108,7 @@ utils-toolkit/
 │   ├── bg-remover/main.jsx    # AI 智能抠图
 │   ├── text-remover/main.jsx  # 智能去文字
 │   ├── image-tool/main.jsx    # 图片批处理
+│   ├── watermark-tool/main.jsx # 视频去水印
 │   └── image-composite/main.jsx # 溶图合成
 │
 ├── backend/                   # 后端服务
@@ -109,9 +120,20 @@ utils-toolkit/
 │   │   ├── video.py           # 视频解析路由
 │   │   ├── bg_remove.py       # 抠图路由
 │   │   ├── text_remove.py     # 去字路由
+│   │   ├── transcript.py      # 文案提取 API 路由
+│   │   ├── watermark.py       # 去水印路由
 │   │   ├── history.py         # 历史记录路由
 │   │   └── static.py          # 静态文件 + 首页路由
 │   ├── parsers/               # 多平台视频解析器（10 个平台）
+│   ├── transcript/            # 文案提取后端模块
+│   │   ├── pipeline.py        # 文案提取管线
+│   │   ├── cloud_asr.py       # 云端 ASR 接入
+│   │   ├── cloud_config.py    # 云端配置管理
+│   │   ├── settings.py        # 设置管理
+│   │   ├── ytdlp_utils.py     # yt-dlp 工具函数
+│   │   ├── temp_manager.py    # 临时文件管理
+│   │   ├── asr/               # ASR 模块
+│   │   └── platforms/         # 平台适配器
 │   └── services/              # 业务服务层
 │       ├── bg_remove_service.py  # 抠图管线服务
 │       ├── download_service.py   # 下载策略服务
@@ -129,7 +151,9 @@ utils-toolkit/
 │   ├── image-tool/            # 图片批处理（构建产物）
 │   ├── bg-remover/            # AI 智能抠图（构建产物）
 │   ├── text-remover/          # 智能去文字（构建产物）
-│   └── image-composite/       # 溶图合成（构建产物）
+│   ├── image-composite/       # 溶图合成（构建产物）
+│   ├── watermark-tool/        # 视频去水印（构建产物）
+│   └── transcript/            # 视频文案提取（前端页面）
 │
 └── docs/
     ├── TOOLS_GUIDE.md         # 开发者指南
@@ -142,6 +166,7 @@ utils-toolkit/
 - **前端**：原生 HTML/CSS/JS（视频工具）、React 18 + Vite（图片工具、抠图工具、去字工具、溶图工具）
 - **视频解析**：自定义多平台解析器 + yt-dlp
 - **AI 抠图**：rembg + ONNX Runtime + MobileNetV3（自动选择 rmbg-2.0 / isnet-general-use / u2net）
+- **语音识别**：faster-whisper（本地 GPU 加速）+ 云端 ASR 回退
 - **图片处理**：Pillow (PIL)
 
 ## 常见问题
@@ -155,6 +180,21 @@ utils-toolkit/
 **一键修复**：双击 `app.bat` 或运行 `python launcher.py` 即可。
 
 首次运行会自动构建前端，后续启动直接跳过。修改了前端源码后，双击 `rebuild.bat` 重新构建。
+
+## 最近更新
+
+### 2025-06-15
+- **新增** 视频文案提取工具：支持多平台视频链接文案提取，集成 faster-whisper 本地识别与云端 ASR 回退
+- **新增** 视频去水印工具（WebUI）
+- **优化** 项目结构，新增 transcript 后端模块
+
+### 2025-06-05
+- **新增** 溶图合成功能
+- **优化** 智能抠图边缘处理与批量导出
+
+### 2025-06-01
+- **重构** 后端架构，拆分为 routers / services 模块
+- **新增** AI 智能抠图，支持 rmbg-2.0 / ISNet / U2Net 三种模型
 
 ## License
 

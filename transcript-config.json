@@ -1,0 +1,15 @@
+{
+  "mode": "local",
+  "default_provider": "mimo",
+  "providers": {
+    "mimo": {
+      "name": "MiMo ASR",
+      "type": "openai-compatible",
+      "api_key": " ",
+      "base_url": " ",
+      "model": "mimo-v2.5-asr",
+      "headers": {}
+    }
+  },
+  "cookies_path": ""
+}

@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from deps import model_manager, disk_cache
-from routers import video, bg_remove, text_remove, history, static
+from routers import video, bg_remove, text_remove, watermark, history, static, transcript
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +72,10 @@ async def cache_stats():
 app.include_router(video.router)
 app.include_router(bg_remove.router)
 app.include_router(text_remove.router)
+app.include_router(watermark.router)
 app.include_router(history.router)
 app.include_router(static.router)
+app.include_router(transcript.router)
 
 # ─── 静态文件挂载 & 404 处理 ──────────────────────────
 # 必须在路由注册之后，以保证 API 路由优先匹配

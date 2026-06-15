@@ -9,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from config import (
     BASE_DIR, PROJECT_DIR, VIDEO_TOOL_DIR, IMAGE_TOOL_DIR,
     BG_REMOVER_DIR, IMAGE_COMPOSITE_DIR, TEXT_REMOVER_DIR,
-    WX_VIDEO_PARSER_DIR, LIBS_DIR,
+    WX_VIDEO_PARSER_DIR, LIBS_DIR, WATERMARK_TOOL_DIR,
+    TRANSCRIPT_DIR,
 )
 
 router = APIRouter()
@@ -51,9 +52,17 @@ def mount_static(app):
     if TEXT_REMOVER_DIR.exists():
         app.mount("/tools/text-remover", StaticFiles(directory=str(TEXT_REMOVER_DIR), html=True), name="text-remover")
 
+    # 挂载暗水印检测工具前端
+    if WATERMARK_TOOL_DIR.exists():
+        app.mount("/tools/watermark-tool", StaticFiles(directory=str(WATERMARK_TOOL_DIR), html=True), name="watermark-tool")
+
     # 挂载视频号解析工具前端
     if WX_VIDEO_PARSER_DIR.exists():
         app.mount("/tools/wx-video-parser", StaticFiles(directory=str(WX_VIDEO_PARSER_DIR), html=True), name="wx-video-parser")
+
+    # 挂载文案提取工具前端
+    if TRANSCRIPT_DIR.exists():
+        app.mount("/tools/transcript", StaticFiles(directory=str(TRANSCRIPT_DIR), html=True), name="transcript")
 
     # 挂载公共库
     if LIBS_DIR.exists():

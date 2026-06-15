@@ -32,6 +32,11 @@ def check_and_install_deps():
         ('scipy', 'scipy'),
         ('rapidocr_onnxruntime', 'rapidocr-onnxruntime'),
         ('simple_lama_inpainting', 'simple-lama-inpainting'),
+        # 视频文案提取（transcript）
+        ('opencc', 'opencc-python-reimplemented'),
+        ('dotenv', 'python-dotenv'),
+        ('aiofiles', 'aiofiles'),
+        ('faster_whisper', 'faster-whisper'),
     ]
 
     missing_req = []
@@ -129,7 +134,7 @@ def build_frontend():
         return  # 无 Node.js，跳过
 
     tools_dir = os.path.join(os.getcwd(), 'tools')
-    for tool in ['bg-remover', 'image-tool', 'text-remover', 'image-composite']:
+    for tool in ['bg-remover', 'image-tool', 'text-remover', 'image-composite', 'watermark-tool']:
         if not os.path.exists(os.path.join(tools_dir, tool, 'index.html')):
             print('  [...] 首次运行，正在构建前端...')
             try:
@@ -229,6 +234,7 @@ def main():
     print(f'  抠图:   {url}tools/bg-remover/')
     print(f'  溶图:   {url}tools/image-composite/')
     print(f'  去文字: {url}tools/text-remover/')
+    print(f'  水印:   {url}tools/watermark-tool/')
     print()
     print('  按 Ctrl+C 停止服务')
     print('=' * 50)
