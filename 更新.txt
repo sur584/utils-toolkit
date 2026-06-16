@@ -1,3 +1,13 @@
+git add .
+git commit -m "新增/修改功能说明"
 git push
 
 git clone https://github.com/sur584/utils-toolkit.git
+
+
+
+#拉取代码（不做修改）
+
+git fetch origin
+git reset --hard origin/master
+git clean -fd
