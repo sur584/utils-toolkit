@@ -65,7 +65,7 @@ async def _fetch(url: str, headers: Dict = None, timeout: float = 15.0, follow: 
             if r.status_code == 200:
                 return r.text
     except Exception as e:
-        logger.warning(f"Fetch {url} failed: {e}")
+        logger.warning(f"Fetch {url[:80]} failed: {type(e).__name__}: {e}")
     return None
 
 

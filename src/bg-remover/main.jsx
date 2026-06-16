@@ -59,8 +59,11 @@ function ImageCard({image, isActive, isSel}){
   var statusText = null;
   if(image.status === 'processing') statusText = <span className="text-xs text-purple-500">{image.statusText || '处理中'}</span>;
   else if(image.status === 'done') {
-    var clsLabel = image.classification ? ({product:'商品',portrait:'人物',pet:'宠物',general:'通用'}[image.classification] || '') : '';
-    statusText = <span className="text-xs text-green-500">{clsLabel ? clsLabel + ' · ' : ''}完成</span>;
+    var clsLabel = '';
+    if(image.classification){
+      clsLabel = ({product:'商品',portrait:'人物',pet:'宠物',general:'通用'}[image.classification] || '') + ' · ';
+    }
+    statusText = <span className="text-xs text-green-500">{clsLabel}完成</span>;
   }
   else if(image.status === 'error') statusText = <span className="text-xs text-red-400">失败</span>;
 
@@ -83,7 +86,7 @@ function ImageCard({image, isActive, isSel}){
       </div>
     </div>
     <div className="flex items-center gap-0.5 flex-shrink-0">
-      {image.status==='done' && <button onClick={e => {e.stopPropagation(); dlOne(image, '_remove', _exportFormat)}} className="p-1 rounded hover:bg-purple-50 text-gray-400 hover:text-purple-500 transition-all" title="下载"><Download/></button>}
+      {image.status==='done' && <button onClick={e => {e.stopPropagation(); dlOne(image, image.suffix || '_remove', _exportFormat)}} className="p-1 rounded hover:bg-purple-50 text-gray-400 hover:text-purple-500 transition-all" title="下载"><Download/></button>}
       {image.status==='error' && <button onClick={e => {e.stopPropagation(); processSingle(image)}} className="p-1 rounded hover:bg-purple-50 text-gray-400 hover:text-purple-500 transition-all" title="重试"><Refresh/></button>}
       <button onClick={e => {e.stopPropagation(); rmImg(image.id)}} className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-400 transition-all" title="删除"><X/></button>
     </div>
@@ -463,7 +466,9 @@ function EditCanvas({resultUrl, thumbUrl, zoom, pan, setPan, editMode, brushSize
 
 // ==================== 预览面板（右侧） ====================
 function PreviewPanel({activeImg, viewMode, setViewMode, sliderPos, setSliderPos, sliderDragging, handleSliderMove, zoom, setZoom, pan, setPan, handleWheel, handlePanDown, handlePanMove, handlePanUp, handleZoomReset, editMode, brushSize, onEditAction}){
-  if(!activeImg) return <EmptyState icon={<Scissors/>} title="拖入图片开始抠图" description="AI 自动识别主体，一键去除背景，生成透明 PNG" theme="purple"/>;
+  if(!activeImg){
+    return <EmptyState icon={<Scissors/>} title="拖入图片开始抠图" description="AI 自动识别主体，一键去除背景，生成透明 PNG" theme="purple"/>;
+  }
 
   // 处理中
   if(activeImg.status === 'processing'){
@@ -546,9 +551,9 @@ function PreviewPanel({activeImg, viewMode, setViewMode, sliderPos, setSliderPos
         {inEdit && <EditCanvas resultUrl={activeImg.resultUrl} thumbUrl={activeImg.thumb} zoom={zoom} pan={pan} setPan={setPan} editMode={editMode} brushSize={brushSize} onSave={function(blob,url){upd(activeImg.id,{resultBlob:blob,resultUrl:url}); onEditAction('done');}} onCancel={onEditAction}/>}
       </div>
       <ZoomControls zoom={zoom} setZoom={setZoom} handleZoomReset={handleZoomReset}/>
-      {!inEdit && <button onClick={() => dlOne(activeImg, '_remove', _exportFormat)} className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-purple-500 text-white text-xs font-medium hover:bg-purple-600 shadow-lg flex items-center gap-1.5 z-10 transition-all"><Download/>下载 PNG</button>}
-      {!inEdit && _devMode && activeImg.classification && <div className="absolute top-14 right-3 px-3 py-2 rounded-lg bg-black/70 backdrop-blur-sm text-white text-[11px] space-y-1 z-10">
-        <div>分类: {activeImg.classification}</div>
+      {!inEdit && <button onClick={() => dlOne(activeImg, activeImg.suffix || '_remove', _exportFormat)} className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-purple-500 text-white text-xs font-medium hover:bg-purple-600 shadow-lg flex items-center gap-1.5 z-10 transition-all"><Download/>下载 PNG</button>}
+      {!inEdit && _devMode && <div className="absolute top-14 right-3 px-3 py-2 rounded-lg bg-black/70 backdrop-blur-sm text-white text-[11px] space-y-1 z-10">
+        <div>分类: {activeImg.classification || '-'}</div>
         <div>模型: {activeImg.modelUsed || '-'}</div>
         <div>缓存: {activeImg.cacheHit ? '命中' : '未命中'}</div>
         <div>耗时: {activeImg.processingTime ? activeImg.processingTime+'ms' : '-'}</div>
@@ -703,14 +708,14 @@ function App(){
     actionBtns = <Btn variant="primary" size="sm" theme="purple" disabled={true}><Scissors/>等待上传图片</Btn>;
   } else if(selCount > 1){
     actionBtns = <>
-      <Btn variant="primary" size="sm" theme="purple" onClick={handleProcessSelected} disabled={processing} loading={processing}><Scissors/>抠图选中 ({selCount})</Btn>
+      <Btn variant="primary" size="sm" theme="purple" onClick={handleProcessSelected} disabled={processing} loading={processing}><Scissors/>批量抠图选中 ({selCount})</Btn>
       <Btn variant="ghost" size="sm" theme="purple" onClick={handleDownloadSelected} disabled={processing}><Download/>下载选中</Btn>
       {processing && <button onClick={function(){if(_batchAbortController) _batchAbortController.abort(); _batchCancelled = true; toast('已取消批处理', 'info');}} className="px-3 py-1.5 text-sm font-medium rounded-lg transition-all flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white"><X/>取消</button>}
     </>;
   } else if(activeImg){
     actionBtns = <>
       <Btn variant="primary" size="sm" theme="purple" onClick={() => processSingle(activeImg)} disabled={processing} loading={processing}><Scissors/>{activeImg.status==='done'?'重新抠图':'一键抠图'}</Btn>
-      {activeImg.status==='done' && <Btn variant="ghost" size="sm" theme="purple" onClick={() => dlOne(activeImg, '_remove', _exportFormat)} disabled={processing}><Download/>下载 PNG</Btn>}
+      {activeImg.status==='done' && <Btn variant="ghost" size="sm" theme="purple" onClick={() => dlOne(activeImg, activeImg.suffix || '_remove', _exportFormat)} disabled={processing}><Download/>下载 PNG</Btn>}
       {processing && <button onClick={function(){if(_batchAbortController) _batchAbortController.abort(); _batchCancelled = true; toast('已取消批处理', 'info');}} className="px-3 py-1.5 text-sm font-medium rounded-lg transition-all flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white"><X/>取消</button>}
     </>;
   } else {
@@ -723,10 +728,11 @@ function App(){
   // 视图切换按钮
   var viewBtns = null;
   if(activeImg && activeImg.status==='done'){
+    var resultLabel = '抠图';
     viewBtns = <>
       <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
         <button onClick={() => {setViewMode('original'); setEditMode('none');}} className={'px-2.5 py-1 rounded-md text-xs font-medium transition-all '+(viewMode==='original'?'bg-white text-gray-800 shadow-sm':'text-gray-500')}>原图</button>
-        <button onClick={() => {setViewMode('result'); setEditMode('none');}} className={'px-2.5 py-1 rounded-md text-xs font-medium transition-all '+(viewMode==='result'?'bg-white text-gray-800 shadow-sm':'text-gray-500')}>抠图</button>
+        <button onClick={() => {setViewMode('result'); setEditMode('none');}} className={'px-2.5 py-1 rounded-md text-xs font-medium transition-all '+(viewMode==='result'?'bg-white text-gray-800 shadow-sm':'text-gray-500')}>{resultLabel}</button>
         <button onClick={() => {setViewMode('compare'); setEditMode('none');}} className={'px-2.5 py-1 rounded-md text-xs font-medium transition-all '+(viewMode==='compare'?'bg-white text-gray-800 shadow-sm':'text-gray-500')}>对比</button>
       </div>
       {viewMode==='result' && <button onClick={() => setEditMode(editMode==='none'?'erase':'none')} className={'px-2.5 py-1 rounded-lg text-xs font-medium border transition-all '+(editMode!=='none'?'bg-orange-50 border-orange-300 text-orange-600':'border-gray-200 text-gray-500 hover:bg-orange-50 hover:text-orange-500 hover:border-orange-300')}>手动编辑</button>}
@@ -747,6 +753,7 @@ function App(){
         }} title="三击切换开发者模式">AI</span>
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 font-medium">V3.0</span>
       </div>
+
     </div>
 
     <div ref={containerRef} className="flex flex-1 overflow-hidden">
@@ -783,6 +790,7 @@ function App(){
             {actionBtns}
             {doneCount>1 && <Btn variant="ghost" size="sm" theme="purple" onClick={handleDownloadAll} disabled={processing}><Download/>下载全部 ({doneCount})</Btn>}
             <div className="flex-1"/>
+
             {images.some(function(i){return i.status==='error'}) && <Btn variant="ghost" size="sm" theme="purple" onClick={function(){
               var failed = images.filter(function(i){return i.status==='error'});
               failed.forEach(function(img){processSingle(img)});

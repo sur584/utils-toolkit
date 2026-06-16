@@ -195,7 +195,11 @@ async def download_video(
             page_url = f"https://www.bilibili.com/video/{vid}"
             platform_name = "B站"
         else:
-            page_url = f"https://www.tiktok.com/@/video/{vid}"
+            # tt://@{username}/{video_id} 或 tt://{video_id}（旧格式）
+            if vid.startswith("@"):
+                page_url = f"https://www.tiktok.com/{vid}"
+            else:
+                page_url = f"https://www.tiktok.com/@/video/{vid}"
             platform_name = "TikTok"
         filepath = DOWNLOAD_DIR / f"{safe_title}.mp4"
 

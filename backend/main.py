@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from deps import model_manager, disk_cache
-from routers import video, bg_remove, text_remove, watermark, history, static, transcript
+from routers import video, bg_remove, text_remove, watermark, watermark_removal, upscale, history, static, transcript
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,8 @@ app.include_router(video.router)
 app.include_router(bg_remove.router)
 app.include_router(text_remove.router)
 app.include_router(watermark.router)
+app.include_router(watermark_removal.router)
+app.include_router(upscale.router)
 app.include_router(history.router)
 app.include_router(static.router)
 app.include_router(transcript.router)

@@ -407,10 +407,9 @@ async function handleDownload() {
     progressText.textContent = '0%';
 
     try {
-        const rawUrl = currentVideoData.video_url || '';
-        const videoUrl = (rawUrl.startsWith('yt://') || rawUrl.startsWith('tt://') || rawUrl.startsWith('bl://') || rawUrl.startsWith('wx://'))
-            ? rawUrl
-            : (currentVideoData.video_url_no_watermark || rawUrl);
+        // 优先使用无水印直链（直接 HTTP 下载，速度快）
+        // 无直链时回退到 video_url（可能为 yt:// / tt:// / bl:// / wx:// 特殊协议）
+        const videoUrl = currentVideoData.video_url_no_watermark || currentVideoData.video_url || '';
         const title = (currentVideoData.title || 'video').substring(0, 50);
         const ref = getReferer(currentVideoData.platform);
         const resp = await fetch(`${API_BASE}/api/download?video_url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title)}&referer=${encodeURIComponent(ref)}`);

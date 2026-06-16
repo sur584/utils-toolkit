@@ -40,6 +40,8 @@ const I={
   square:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>,
   roundedRect:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="6"/></svg>,
   eye:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+  droplet:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></svg>,
+  sparkle:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/></svg>,
 };
 
 // ==================== 进度条组件 ====================
@@ -173,6 +175,184 @@ function CompressPanel(){
       </div>)}
     </div>
     <div className="flex items-center gap-2 pt-1 flex-shrink-0 flex-wrap"><Btn variant="primary" className="flex-1 min-w-0" onClick={compress} disabled={!targets.length||proc} loading={proc}><I.zap/>{sel.size>0?`压缩选中 (${sel.size})`:'开始压缩'}</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}>清空</Btn></div>
+  </div>;
+}
+
+// ==================== 去水印面板 ====================
+function WatermarkPanel(){
+  const{images,sel}=useStore();
+  const[sensitivity,setSensitivity]=useState('medium');
+  const[method,setMethod]=useState('telea');
+  const[proc,setProc]=useState(false);
+  const[progress,setProgress]=useState(0);
+  const[procCount,setProcCount]=useState(0);
+  const targets=sel.size>0?images.filter(i=>sel.has(i.id)):images;
+  const dn=targets.filter(i=>i.status==='done').length;
+
+  const processSingle=async(img)=>{
+    const fd=new FormData();
+    fd.append('file',img.file);
+    fd.append('sensitivity',sensitivity);
+    fd.append('method',method);
+    const res=await fetch('/api/watermark-removal',{method:'POST',body:fd});
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const blob=await res.blob();
+    return blob;
+  };
+
+  const processBatch=async()=>{
+    setProc(true);setProgress(0);setProcCount(0);
+    const pending=targets.filter(i=>i.status!=='done');
+    if(pending.length===0){setProc(false);return}
+
+    const results=[];
+    const doOne=async(img)=>{
+      upd(img.id,{status:'processing',progress:50});
+      const blob=await processSingle(img);
+      const url=URL.createObjectURL(blob);
+      upd(img.id,{status:'done',blob,cSize:blob.size,cUrl:url,progress:100});
+      results.push({name:img.name.replace(/\.[^.]+$/,'')+'_nowm.png',origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:blob.size,blob,imgId:img.id});
+    };
+
+    if(pending.length===1){
+      try{await doOne(pending[0]);setProcCount(1)}catch(e){upd(pending[0].id,{status:'error'});console.error('Watermark removal failed:',e)}
+      setProc(false);
+      if(results.length)setPreview({type:'watermark',items:results});
+      return;
+    }
+
+    // 批量并发处理
+    const CONC=3;let idx=0;let doneCount=0;
+    const worker=async()=>{
+      while(idx<pending.length){
+        const img=pending[idx++];if(!img)break;
+        try{await doOne(img)}catch(e){upd(img.id,{status:'error'});console.error('Watermark removal failed:',e)}
+        doneCount++;
+        setProcCount(doneCount);
+        setProgress(Math.round(doneCount/pending.length*100));
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(CONC,pending.length)},()=>worker()));
+    setProc(false);
+    if(results.length)setPreview({type:'watermark',items:results});
+  };
+
+  return <div className="h-full flex flex-col p-4 gap-3 animate-fade-up overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm flex-shrink-0">
+      <div className="flex items-center justify-between mb-3"><p className="text-base font-medium text-gray-700">去水印设置</p>{sel.size>0&&<span className="text-xs text-blue-500">已选 {sel.size} 张</span>}</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="text-xs text-gray-500 mb-1 block">灵敏度</label><select value={sensitivity} onChange={e=>setSensitivity(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600 outline-none cursor-pointer hover:bg-gray-100 transition-colors"><option value="low">低 - 轻微水印</option><option value="medium">中 - 普通水印</option><option value="high">高 - 重度水印</option></select></div>
+        <div><label className="text-xs text-gray-500 mb-1 block">修复方法</label><select value={method} onChange={e=>setMethod(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600 outline-none cursor-pointer hover:bg-gray-100 transition-colors"><option value="telea">Telea - 速度快</option><option value="ns">NS - 质量高</option></select></div>
+      </div>
+    </div>
+    {proc&&<div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm animate-fade-up flex-shrink-0">
+      <div className="flex items-center gap-1.5 mb-2.5"><span className="text-blue-500"><I.droplet/></span><p className="text-base font-medium text-gray-700">处理进度</p></div>
+      <Progress value={progress} label={`${procCount}/${targets.length}`} className="mt-1"/>
+    </div>}
+    {dn>0&&!proc&&<div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm animate-fade-up flex-shrink-0">
+      <div className="flex items-center gap-1.5 mb-2.5"><span className="text-green-500"><I.trending/></span><p className="text-base font-medium text-gray-700">处理统计</p></div>
+      <div className="grid grid-cols-2 gap-3"><div><p className="text-xs text-gray-400">已完成</p><p className="text-base font-semibold text-blue-500">{dn} / {targets.length}</p></div><div><p className="text-xs text-gray-400">成功率</p><p className="text-base font-semibold text-green-500">{Math.round(dn/targets.length*100)}%</p></div></div>
+    </div>}
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+      <p className="text-xs text-gray-400 mb-1">图片列表 ({targets.length})</p>
+      {targets.map((img,i)=><div key={img.id} className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-gray-100 hover:border-gray-200 transition-all animate-fade-up" style={{animationDelay:`${i*25}ms`}}>
+        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" loading="lazy" className="w-full h-full object-cover"/></div>
+        <div className="flex-1 min-w-0"><p className="text-sm text-gray-700 truncate">{img.name}</p><div className="flex items-center gap-1.5 mt-0.5"><span className="text-xs text-gray-400">{fmt(img.size)}</span>{img.cSize&&<><span className="text-xs text-gray-300">→</span><span className="text-xs text-blue-500">{fmt(img.cSize)}</span></>}</div></div>
+        {img.status==='processing'&&<Progress value={img.progress||0} className="w-16"/>}
+        {img.status==='done'&&<span className="text-xs text-green-500 font-medium">完成</span>}
+        {img.status==='error'&&<span className="text-xs text-red-400 font-medium">失败</span>}
+      </div>)}
+    </div>
+    <div className="flex items-center gap-2 pt-1 flex-shrink-0 flex-wrap"><Btn variant="primary" className="flex-1 min-w-0" onClick={processBatch} disabled={!targets.length||proc} loading={proc}><I.droplet/>{sel.size>0?`去水印 (${sel.size})`:'开始去水印'}</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}>清空</Btn></div>
+  </div>;
+}
+
+// ==================== 高清化面板 ====================
+function UpscalePanel(){
+  const{images,sel}=useStore();
+  const[scale,setScale]=useState(2);
+  const[proc,setProc]=useState(false);
+  const[progress,setProgress]=useState(0);
+  const[procCount,setProcCount]=useState(0);
+  const targets=sel.size>0?images.filter(i=>sel.has(i.id)):images;
+  const dn=targets.filter(i=>i.status==='done').length;
+
+  const processSingle=async(img)=>{
+    const fd=new FormData();
+    fd.append('file',img.file);
+    fd.append('scale',String(scale));
+    const res=await fetch('/api/upscale',{method:'POST',body:fd});
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const blob=await res.blob();
+    return blob;
+  };
+
+  const processBatch=async()=>{
+    setProc(true);setProgress(0);setProcCount(0);
+    const pending=targets.filter(i=>i.status!=='done');
+    if(pending.length===0){setProc(false);return}
+
+    const results=[];
+    const doOne=async(img)=>{
+      upd(img.id,{status:'processing',progress:50});
+      const blob=await processSingle(img);
+      const url=URL.createObjectURL(blob);
+      upd(img.id,{status:'done',blob,cSize:blob.size,cUrl:url,progress:100});
+      const ext=img.name.lastIndexOf('.')>0?img.name.substring(img.name.lastIndexOf('.')):'.png';
+      results.push({name:img.name.replace(/\.[^.]+$/,'')+'_'+scale+'x.png',origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:blob.size,blob,imgId:img.id});
+    };
+
+    if(pending.length===1){
+      try{await doOne(pending[0]);setProcCount(1)}catch(e){upd(pending[0].id,{status:'error'});console.error('Upscale failed:',e)}
+      setProc(false);
+      if(results.length)setPreview({type:'upscale',items:results});
+      return;
+    }
+
+    // 批量并发处理
+    const CONC=3;let idx=0;let doneCount=0;
+    const worker=async()=>{
+      while(idx<pending.length){
+        const img=pending[idx++];if(!img)break;
+        try{await doOne(img)}catch(e){upd(img.id,{status:'error'});console.error('Upscale failed:',e)}
+        doneCount++;
+        setProcCount(doneCount);
+        setProgress(Math.round(doneCount/pending.length*100));
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(CONC,pending.length)},()=>worker()));
+    setProc(false);
+    if(results.length)setPreview({type:'upscale',items:results});
+  };
+
+  return <div className="h-full flex flex-col p-4 gap-3 animate-fade-up overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm flex-shrink-0">
+      <div className="flex items-center justify-between mb-3"><p className="text-base font-medium text-gray-700">高清化设置</p>{sel.size>0&&<span className="text-xs text-blue-500">已选 {sel.size} 张</span>}</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="text-xs text-gray-500 mb-1 block">放大倍数</label><div className="flex items-center gap-1.5">
+          {[{l:'2x',v:2},{l:'4x',v:4}].map(p=><button key={p.v} onClick={()=>setScale(p.v)} className={`flex-1 h-9 px-3 rounded-lg text-sm font-medium transition-all border ${scale===p.v?'bg-blue-50 text-blue-600 border-blue-200':'text-gray-500 border-gray-200 hover:bg-gray-50'}`}>{p.l}</button>)}
+        </div></div>
+      </div>
+    </div>
+    {proc&&<div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm animate-fade-up flex-shrink-0">
+      <div className="flex items-center gap-1.5 mb-2.5"><span className="text-purple-500"><I.sparkle/></span><p className="text-base font-medium text-gray-700">处理进度</p></div>
+      <Progress value={progress} label={`${procCount}/${targets.length}`} className="mt-1"/>
+    </div>}
+    {dn>0&&!proc&&<div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm animate-fade-up flex-shrink-0">
+      <div className="flex items-center gap-1.5 mb-2.5"><span className="text-green-500"><I.trending/></span><p className="text-base font-medium text-gray-700">处理统计</p></div>
+      <div className="grid grid-cols-2 gap-3"><div><p className="text-xs text-gray-400">已完成</p><p className="text-base font-semibold text-blue-500">{dn} / {targets.length}</p></div><div><p className="text-xs text-gray-400">成功率</p><p className="text-base font-semibold text-green-500">{Math.round(dn/targets.length*100)}%</p></div></div>
+    </div>}
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+      <p className="text-xs text-gray-400 mb-1">图片列表 ({targets.length})</p>
+      {targets.map((img,i)=><div key={img.id} className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-gray-100 hover:border-gray-200 transition-all animate-fade-up" style={{animationDelay:`${i*25}ms`}}>
+        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" loading="lazy" className="w-full h-full object-cover"/></div>
+        <div className="flex-1 min-w-0"><p className="text-sm text-gray-700 truncate">{img.name}</p><div className="flex items-center gap-1.5 mt-0.5"><span className="text-xs text-gray-400">{fmt(img.size)}</span>{img.cSize&&<><span className="text-xs text-gray-300">→</span><span className="text-xs text-blue-500">{fmt(img.cSize)}</span></>}</div></div>
+        {img.status==='processing'&&<Progress value={img.progress||0} className="w-16"/>}
+        {img.status==='done'&&<span className="text-xs text-green-500 font-medium">完成</span>}
+        {img.status==='error'&&<span className="text-xs text-red-400 font-medium">失败</span>}
+      </div>)}
+    </div>
+    <div className="flex items-center gap-2 pt-1 flex-shrink-0 flex-wrap"><Btn variant="primary" className="flex-1 min-w-0" onClick={processBatch} disabled={!targets.length||proc} loading={proc}><I.sparkle/>{sel.size>0?`高清化 (${sel.size})`:'开始高清化'}</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}>清空</Btn></div>
   </div>;
 }
 
@@ -516,11 +696,47 @@ function DownloadPanel(){
   </div>;
 }
 
+// ==================== 图片放大查看器 ====================
+function ZoomViewer({url, label, onClose}){
+  const[zoom,setZoom]=useState(1);
+  const[pan,setPan]=useState({x:0,y:0});
+  const dragging=useRef(false);
+  const start=useRef({x:0,y:0,px:0,py:0});
+  useEffect(()=>{
+    function onKey(e){if(e.key==='Escape')onClose()}
+    document.addEventListener('keydown',onKey);
+    return()=>document.removeEventListener('keydown',onKey);
+  },[onClose]);
+  const handleWheel=e=>{e.preventDefault();setZoom(z=>Math.max(0.2,Math.min(10,z+(e.deltaY>0?-0.3:0.3))))};
+  const handleDown=e=>{e.preventDefault();dragging.current=true;start.current={x:e.clientX,y:e.clientY,px:pan.x,py:pan.y}};
+  const handleMove=e=>{if(!dragging.current)return;setPan({x:start.current.px+(e.clientX-start.current.x),y:start.current.py+(e.clientY-start.current.y)})};
+  const handleUp=()=>{dragging.current=false};
+  return <div className="fixed inset-0 z-[60] bg-black/80 flex flex-col" onClick={onClose}>
+    <div className="flex items-center justify-between px-5 py-3 text-white flex-shrink-0">
+      <span className="text-sm font-medium">{label}</span>
+      <div className="flex items-center gap-2">
+        <button onClick={e=>{e.stopPropagation();setZoom(z=>Math.max(0.2,z-0.5))}} className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-sm">-</button>
+        <span className="text-sm w-12 text-center">{Math.round(zoom*100)}%</span>
+        <button onClick={e=>{e.stopPropagation();setZoom(z=>Math.min(10,z+0.5))}} className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-sm">+</button>
+        <button onClick={e=>{e.stopPropagation();setZoom(1);setPan({x:0,y:0})}} className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-xs">重置</button>
+        <button onClick={e=>{e.stopPropagation();onClose()}} className="p-1 rounded hover:bg-white/20"><X size={16}/></button>
+      </div>
+    </div>
+    <div className="flex-1 overflow-hidden cursor-grab active:cursor-grabbing" onClick={e=>e.stopPropagation()}
+      onWheel={handleWheel} onMouseDown={handleDown} onMouseMove={handleMove} onMouseUp={handleUp} onMouseLeave={handleUp}>
+      <img src={url} alt="" className="max-w-none select-none" draggable={false}
+        style={{position:'absolute',top:'50%',left:'50%',transform:`translate(-50%,-50%) scale(${zoom}) translate(${pan.x/zoom}px,${pan.y/zoom}px)`,maxWidth:zoom<=1?'100%':'none',maxHeight:zoom<=1?'100%':'none',objectFit:'contain'}}/>
+    </div>
+    <div className="flex items-center justify-center px-5 py-2 text-white/60 text-xs flex-shrink-0">滚轮缩放 · 拖拽平移 · 点击空白关闭</div>
+  </div>;
+}
+
 // ==================== 压缩/裁剪结果预览弹窗 ====================
 function PreviewModal(){
   const{preview}=useStore();
   const[removed,setRemoved]=useState(new Set());
   const[names,setNames]=useState(()=>preview?preview.items.map(it=>it.name):[]);
+  const[zoomTarget,setZoomTarget]=useState(null);
   useEffect(()=>{if(preview)setNames(preview.items.map(it=>it.name))},[preview]);
   if(!preview)return null;
   const{items,type}=preview;
@@ -535,49 +751,56 @@ function PreviewModal(){
   };
   const toggleRemove=i=>setRemoved(s=>{const n=new Set(s);n.has(i)?n.delete(i):n.add(i);return n});
   const updateName=(i,v)=>setNames(prev=>{const n=[...prev];n[i]=v;return n});
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-up" onClick={close}>
-    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 max-h-[85vh] flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-        <h3 className="text-base font-semibold text-gray-800">{type==='compress'?'压缩结果':'裁剪结果'} ({keptIdx.length}/{items.length} 保留)</h3>
-        <button onClick={close} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"><X size={12}/></button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-5">
-        <div className="grid grid-cols-2 gap-4">
-          {items.map((item,i)=>{
-            const isOff=removed.has(i);
-            return <div key={i} className={`relative bg-gray-50 rounded-xl p-3 animate-fade-up transition-all ${isOff?'opacity-40 grayscale':'hover:shadow-md'}`} style={{animationDelay:`${i*60}ms`}}>
-              <button onClick={()=>toggleRemove(i)} className={`absolute top-2 right-2 z-10 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs transition-all ${isOff?'bg-gray-400 hover:bg-gray-500':'bg-red-400 hover:bg-red-500'}`} title={isOff?'恢复此图':'移除此结果'}><X size={12}/></button>
-              <input type="text" value={names[i]||item.name} onChange={e=>updateName(i,e.target.value)}
-                className={`w-full text-sm font-medium mb-2 px-2 py-1.5 rounded border bg-white outline-none transition-all ${isOff?'text-gray-400 line-through border-transparent':'text-gray-700 border-gray-200 focus:border-blue-400'}`}/>
-              <div className="flex gap-3 mb-3">
-                <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-200">
-                  <img src={item.origUrl} alt="" className="w-full h-40 object-contain"/>
-                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/50 text-white text-[11px]">原图</span>
+  const typeLabel={compress:'压缩结果',crop:'裁剪结果',watermark:'去水印结果',upscale:'高清化结果'}[type]||'处理结果';
+  const afterLabel={compress:'压缩后',crop:'裁剪后',watermark:'去水印后',upscale:'高清化后'}[type]||'处理后';
+  return <>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-up" onClick={close}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 max-h-[85vh] flex flex-col overflow-hidden" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+          <h3 className="text-base font-semibold text-gray-800">{typeLabel} ({keptIdx.length}/{items.length} 保留)</h3>
+          <button onClick={close} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"><X size={12}/></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          <div className="grid grid-cols-2 gap-4">
+            {items.map((item,i)=>{
+              const isOff=removed.has(i);
+              return <div key={i} className={`relative bg-gray-50 rounded-xl p-3 animate-fade-up transition-all ${isOff?'opacity-40 grayscale':'hover:shadow-md'}`} style={{animationDelay:`${i*60}ms`}}>
+                <button onClick={()=>toggleRemove(i)} className={`absolute top-2 right-2 z-10 w-6 h-6 rounded-full flex items-center justify-center text-white text-xs transition-all ${isOff?'bg-gray-400 hover:bg-gray-500':'bg-red-400 hover:bg-red-500'}`} title={isOff?'恢复此图':'移除此结果'}><X size={12}/></button>
+                <input type="text" value={names[i]||item.name} onChange={e=>updateName(i,e.target.value)}
+                  className={`w-full text-sm font-medium mb-2 px-2 py-1.5 rounded border bg-white outline-none transition-all ${isOff?'text-gray-400 line-through border-transparent':'text-gray-700 border-gray-200 focus:border-blue-400'}`}/>
+                <div className="flex gap-3 mb-3">
+                  <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-200 cursor-pointer group/img" onClick={()=>setZoomTarget({url:item.origUrl,label:'原图'})}>
+                    <img src={item.origUrl} alt="" className="w-full h-40 object-contain transition-transform group-hover/img:scale-105"/>
+                    <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/50 text-white text-[11px]">原图</span>
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover/img:bg-black/10 transition-colors"><span className="opacity-0 group-hover/img:opacity-100 text-white text-xs bg-black/50 px-2 py-1 rounded transition-opacity">点击放大</span></span>
+                  </div>
+                  <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-200 cursor-pointer group/img" onClick={()=>setZoomTarget({url:item.resultUrl,label:afterLabel})}>
+                    <img src={item.resultUrl} alt="" className="w-full h-40 object-contain transition-transform group-hover/img:scale-105"/>
+                    <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-blue-500/80 text-white text-[11px]">{afterLabel}</span>
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover/img:bg-black/10 transition-colors"><span className="opacity-0 group-hover/img:opacity-100 text-white text-xs bg-black/50 px-2 py-1 rounded transition-opacity">点击放大</span></span>
+                  </div>
                 </div>
-                <div className="flex-1 relative rounded-lg overflow-hidden bg-gray-200">
-                  <img src={item.resultUrl} alt="" className="w-full h-40 object-contain"/>
-                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-blue-500/80 text-white text-[11px]">{type==='compress'?'压缩后':'裁剪后'}</span>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div><p className="text-[11px] text-gray-400">原始大小</p><p className="text-xs font-semibold text-gray-700">{fmt(item.origSize)}</p></div>
+                  <div><p className="text-[11px] text-gray-400">处理后</p><p className="text-xs font-semibold text-blue-500">{fmt(item.resultSize)}</p></div>
+                  <div><p className="text-[11px] text-gray-400">节省空间</p><p className="text-xs font-semibold text-green-500">{item.saving}</p></div>
                 </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div><p className="text-[11px] text-gray-400">原始大小</p><p className="text-xs font-semibold text-gray-700">{fmt(item.origSize)}</p></div>
-                <div><p className="text-[11px] text-gray-400">处理后</p><p className="text-xs font-semibold text-blue-500">{fmt(item.resultSize)}</p></div>
-                <div><p className="text-[11px] text-gray-400">节省空间</p><p className="text-xs font-semibold text-green-500">{item.saving}</p></div>
-              </div>
-            </div>;
-          })}
+              </div>;
+            })}
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
+          <Btn variant="ghost" size="sm" onClick={close}>关闭</Btn>
+          <Btn variant="primary" size="sm" disabled={!keptIdx.length} onClick={async()=>{
+            if(keptIdx.length===1){const i=keptIdx[0];saveAs(items[i].blob,names[i]||items[i].name)}
+            else{const zip=new JSZip();keptIdx.forEach(i=>zip.file(names[i]||items[i].name,items[i].blob));const zipNames={compress:'compressed',crop:'cropped',watermark:'nowatermark',upscale:'upscaled'};saveAs(await zip.generateAsync({type:'blob'}),(zipNames[type]||'processed')+'_images.zip')}
+            close()
+          }}><Download/>下载保留项 ({keptIdx.length})</Btn>
         </div>
       </div>
-      <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-100">
-        <Btn variant="ghost" size="sm" onClick={close}>关闭</Btn>
-        <Btn variant="primary" size="sm" disabled={!keptIdx.length} onClick={async()=>{
-          if(keptIdx.length===1){const i=keptIdx[0];saveAs(items[i].blob,names[i]||items[i].name)}
-          else{const zip=new JSZip();keptIdx.forEach(i=>zip.file(names[i]||items[i].name,items[i].blob));saveAs(await zip.generateAsync({type:'blob'}),'images.zip')}
-          close()
-        }}><Download/>下载保留项 ({keptIdx.length})</Btn>
-      </div>
     </div>
-  </div>;
+    {zoomTarget&&<ZoomViewer url={zoomTarget.url} label={zoomTarget.label} onClose={()=>setZoomTarget(null)}/>}
+  </>;
 }
 
 // ==================== 裁剪结果预览面板（右侧） ====================
@@ -667,7 +890,7 @@ function ImagePreview(){
 function App(){
   const{images,tab,sel,preview,previewImg}=useStore();
   const has=images.length>0;
-  const tabs=[{id:'compress',l:'压缩',icon:I.zap},{id:'crop',l:'裁剪',icon:I.scissors},{id:'download',l:'下载',icon:Download}];
+  const tabs=[{id:'compress',l:'压缩',icon:I.zap},{id:'watermark',l:'去水印',icon:I.droplet},{id:'upscale',l:'高清化',icon:I.sparkle},{id:'crop',l:'裁剪',icon:I.scissors},{id:'download',l:'下载',icon:Download}];
   const tot=images.reduce((a,i)=>a+i.size,0);const comp=images.reduce((a,i)=>a+(i.cSize||0),0);
   const selCount=sel.size;
 
@@ -716,7 +939,7 @@ function App(){
           <div className="flex items-center gap-1 px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
             {tabs.map(t=><button key={t.id} onClick={()=>{_tab=t.id;notify()}} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${tab===t.id?'bg-blue-500 text-white':'text-gray-500 hover:bg-gray-100'}`}><t.icon/>{t.l}</button>)}
           </div>
-          <div className="flex-1 overflow-hidden">{!has?<EmptyState/>:<div key={tab} className="h-full">{tab==='compress'&&<CompressPanel/>}{tab==='crop'&&<CropPanel/>}{tab==='download'&&<DownloadPanel/>}</div>}</div>
+          <div className="flex-1 overflow-hidden">{!has?<EmptyState/>:<div key={tab} className="h-full">{tab==='compress'&&<CompressPanel/>}{tab==='watermark'&&<WatermarkPanel/>}{tab==='upscale'&&<UpscalePanel/>}{tab==='crop'&&<CropPanel/>}{tab==='download'&&<DownloadPanel/>}</div>}</div>
         </div>
         {has&&!isMobile&&<>
           <Divider onDrag={handleRightDrag}/>

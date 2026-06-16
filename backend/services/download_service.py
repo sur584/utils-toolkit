@@ -108,7 +108,11 @@ class DownloadService:
         vid = video_url[5:]
 
         url_template, platform_name = self._YT_DLP_PLATFORMS[platform_key]
-        page_url = url_template.format(vid)
+        # tt:// 支持 @username/video_id 和 video_id 两种格式
+        if platform_key == "tt://" and vid.startswith("@"):
+            page_url = f"https://www.tiktok.com/{vid}"
+        else:
+            page_url = url_template.format(vid)
         filepath = self.downloads_dir / f"{safe_title}.mp4"
 
         # 如果已有有效文件，直接返回
