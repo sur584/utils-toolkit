@@ -47,6 +47,23 @@
 
         <!-- 单个解析 -->
         <section class="tab-panel active" id="panel-parse">
+            <!-- 代理配置（简洁，用于客户端有梯子但服务端无梯子的场景） -->
+            <details class="proxy-config" id="proxyConfig" style="margin-bottom:12px;font-size:13px">
+                <summary style="cursor:pointer;color:var(--text-secondary);user-select:none">
+                    🌐 代理配置 <span id="proxyStatus" style="font-size:12px;color:var(--danger)">（未配置）</span>
+                </summary>
+                <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+                    <input type="text" id="proxyInput" placeholder="例如: http://192.168.1.18:7890" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card-bg);color:var(--text);font-size:13px">
+                    <button class="btn btn-primary btn-sm" id="proxySaveBtn">保存</button>
+                    <button class="btn btn-ghost btn-sm" id="proxyClearBtn" style="display:none">清除</button>
+                </div>
+                <p style="margin:6px 0 0;font-size:12px;color:var(--text-secondary)">
+                    仅在服务端无法直连 TikTok/YouTube 等平台时需要配置。
+                    填入客户端设备的代理地址（如 Clash/V2Ray 的 HTTP 端口），
+                    服务端将通过该代理转发请求。
+                </p>
+            </details>
+
             <div class="card parse-card">
                 <div class="card-header">
                     <h2>解析视频链接</h2>
@@ -106,7 +123,10 @@
                     </div>
                     <div class="action-buttons">
                         <button class="btn btn-primary btn-lg" id="downloadBtn">
-                            ⬇ 下载视频
+                            <span class="btn-text">⬇ 下载视频</span>
+                            <span class="btn-loading" style="display:none">
+                                <span class="spinner"></span> 下载中...
+                            </span>
                         </button>
                         <button class="btn btn-secondary btn-lg" id="copyLinkBtn">
                             🔗 复制直链

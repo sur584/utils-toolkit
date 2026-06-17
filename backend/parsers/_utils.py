@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from config import HTTP_PROXY
+from config import get_active_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +62,10 @@ async def _follow_redirects(url: str, timeout: float = 10.0) -> str:
 
 async def _fetch(url: str, headers: Dict = None, timeout: float = 15.0, follow: bool = True) -> Optional[str]:
     try:
+        proxy = get_active_proxy()
         client_kwargs = dict(timeout=timeout, verify=False, follow_redirects=follow)
-        if HTTP_PROXY:
-            client_kwargs["proxies"] = HTTP_PROXY
+        if proxy:
+            client_kwargs["proxies"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as c:
             r = await c.get(url, headers=headers or _headers())
             if r.status_code == 200:

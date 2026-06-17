@@ -5,12 +5,134 @@
 
 const API_BASE = window.location.origin;
 
+// CORS 代理服务列表（用于服务端无法直连的平台，浏览器端通过代理获取 HTML 后交给服务端解析）
+const CORS_PROXIES = [
+    (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+];
+
+// 需要 CORS 代理中继的平台（服务端无法直接访问，依赖客户端代理获取 HTML）
+const NEEDS_RELAY = ['tiktok'];
+
 const PLATFORM_NAMES = {
     douyin: '抖音', bilibili: 'B站', weibo: '微博',
     xiaohongshu: '小红书', tiktok: 'TikTok', youtube: 'YouTube',
     instagram: 'Instagram', twitter: 'Twitter/X', xigua: '西瓜视频',
     wechat_channels: '微信视频号', direct: '直接链接',
 };
+
+// ─── 平台检测 & CORS 中继 ─────────────────────────
+function _detectPlatform(url) {
+    const patterns = {
+        tiktok: /tiktok\.com\//,
+        youtube: /youtube\.com\/|youtu\.be\//,
+        instagram: /instagram\.com\//,
+        twitter: /twitter\.com\/|x\.com\//,
+    };
+    for (const [name, re] of Object.entries(patterns)) {
+        if (re.test(url)) return name;
+    }
+    return null;
+}
+
+async function _tryCorsProxyRelay(url) {
+    const platform = _detectPlatform(url);
+    if (!platform || !NEEDS_RELAY.includes(platform)) return null;
+
+    // 提取视频 ID
+    const vidMatch = url.match(/\/video\/(\d+)/);
+    const userMatch = url.match(/\/(@[\w.-]+)\//);
+    const videoId = vidMatch ? vidMatch[1] : '';
+    const username = userMatch ? userMatch[1] : '@';
+
+    // 通过 CORS 代理调用 TikTok oEmbed API（官方公开接口，返回标准 JSON）
+    const cleanUrl = url.split('?')[0];
+    const apiUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(cleanUrl)}`;
+    for (const buildProxyUrl of CORS_PROXIES) {
+        try {
+            const proxyUrl = buildProxyUrl(apiUrl);
+            showStatus(statusBar, `🔄 通过 CORS 代理获取 TikTok 数据...`, 'info');
+            const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+            if (!resp.ok) continue;
+            const text = await resp.text();
+            if (!text || text.length < 20) continue;
+            const oembed = JSON.parse(text.trim());
+            if (oembed && oembed.author_name) {
+                return {
+                    success: true,
+                    data: {
+                        id: videoId,
+                        platform: 'tiktok',
+                        title: oembed.title || '无标题',
+                        author: (oembed.author_name || '').replace('@', ''),
+                        cover: oembed.thumbnail_url || '',
+                        duration: 0,
+                        video_url: `tt://${username}/video/${videoId}`,
+                        video_url_no_watermark: '',
+                        digg_count: 0,
+                        comment_count: 0,
+                        share_count: 0,
+                    }
+                };
+            }
+        } catch {
+            continue;
+        }
+    }
+
+    return null;
+}
+
+
+// ─── 代理配置 ─────────────────────────────────────
+async function loadProxyStatus() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/proxy-config`);
+        const data = await resp.json();
+        if (proxyInput) proxyInput.value = data.client_proxy || '';
+        updateProxyStatus(data.active);
+    } catch { /* 忽略 */ }
+}
+
+function updateProxyStatus(activeProxy) {
+    if (!proxyStatus) return;
+    if (activeProxy) {
+        proxyStatus.textContent = `（代理: ${activeProxy}）`;
+        proxyStatus.style.color = 'var(--success, #22c55e)';
+        if (proxyClearBtn) proxyClearBtn.style.display = 'inline-flex';
+    } else {
+        proxyStatus.textContent = '（未配置）';
+        proxyStatus.style.color = 'var(--danger, #ef4444)';
+        if (proxyClearBtn) proxyClearBtn.style.display = 'none';
+    }
+}
+
+async function handleProxySave() {
+    if (!proxyInput) return;
+    const proxy = proxyInput.value.trim();
+    try {
+        const resp = await fetch(`${API_BASE}/api/proxy-config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ proxy }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('代理配置已保存', 'success');
+            updateProxyStatus(proxy || '');
+        } else {
+            showToast('保存失败', 'error');
+        }
+    } catch (err) {
+        showToast(`保存失败: ${err.message}`, 'error');
+    }
+}
+
+async function handleProxyClear() {
+    if (proxyInput) proxyInput.value = '';
+    await handleProxySave();
+}
+
 
 // ─── DOM ───────────────────────────────────────────
 const $ = (sel) => document.querySelector(sel);
@@ -50,15 +172,103 @@ const previewVideo = $('#previewVideo');
 const previewFallback = $('#previewFallback');
 const closeModalBtn = $('#closeModal');
 const themeToggle = $('#themeToggle');
+const proxyInput = $('#proxyInput');
+const proxySaveBtn = $('#proxySaveBtn');
+const proxyClearBtn = $('#proxyClearBtn');
+const proxyStatus = $('#proxyStatus');
 
 let currentVideoData = null;
 let selectedImages = new Set();
+
+// ─── 代理自动检测 ────────────────────────────────
+
+// 常见代理端口（Clash/V2Ray/Surge 等客户端的默认端口）
+const COMMON_PROXY_PORTS = [7890, 7891, 10809, 1080, 1081, 8080, 3128, 8888, 1088];
+
+async function _getLocalIP() {
+    /** 通过 WebRTC 获取客户端内网 IP */
+    try {
+        const pc = new RTCPeerConnection({ iceServers: [] });
+        pc.createDataChannel('');
+        const ip = await new Promise((resolve) => {
+            pc.onicecandidate = (e) => {
+                if (!e || !e.candidate) return;
+                const m = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
+                if (m) { resolve(m[1]); pc.close(); }
+            };
+            pc.createOffer().then(o => pc.setLocalDescription(o));
+            setTimeout(() => resolve(null), 3000);
+        });
+        pc.close();
+        return ip;
+    } catch { return null; }
+}
+
+async function _testPort(ip, port) {
+    /** 检测客户端指定端口是否开放（能建立 TCP 连接） */
+    try {
+        const resp = await fetch(`http://${ip}:${port}`, {
+            mode: 'no-cors',
+            signal: AbortSignal.timeout(2000),
+        });
+        return true;
+    } catch { return false; }
+}
+
+async function autoDetectProxy() {
+    /** 自动检测客户端代理地址并配置到后端 */
+    if (proxyStatus && proxyStatus.textContent.includes('（未配置）') === false && proxyStatus.textContent.includes('自动检测') === false) {
+        return; // 已有代理配置，跳过
+    }
+    const origStatus = proxyStatus ? proxyStatus.textContent : '';
+
+    // 显示检测中状态
+    if (proxyStatus) {
+        proxyStatus.textContent = '（正在检测代理...）';
+        proxyStatus.style.color = 'var(--warning, #f59e0b)';
+    }
+
+    const ip = await _getLocalIP();
+    if (!ip) {
+        if (proxyStatus) proxyStatus.textContent = origStatus || '（未配置）';
+        return;
+    }
+
+    for (const port of COMMON_PROXY_PORTS) {
+        const open = await _testPort(ip, port);
+        if (!open) continue;
+
+        const proxyUrl = `http://${ip}:${port}`;
+        // 找到开放端口，自动配置到后端
+        try {
+            const resp = await fetch(`${API_BASE}/api/proxy-config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ proxy: proxyUrl }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                updateProxyStatus(proxyUrl);
+                if (proxyInput) proxyInput.value = proxyUrl;
+                console.log(`[代理] 自动检测到: ${proxyUrl}`);
+                return;
+            }
+        } catch { /* 继续尝试 */ }
+    }
+
+    // 未检测到任何可用代理
+    if (proxyStatus) proxyStatus.textContent = origStatus || '（未配置）';
+}
+
 
 // ─── 初始化 ──────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initTabs();
     initEventListeners();
+    loadProxyStatus();
+    // 页面加载后自动检测代理（非阻塞，不要等待完成）
+    autoDetectProxy();
 });
 
 // ─── 主题 ────────────────────────────────────────
@@ -139,8 +349,8 @@ function initEventListeners() {
                 currentVideoData.video_url = url;
                 currentVideoData.video_url_no_watermark = url;
                 // 更新按钮状态
-                downloadBtn.textContent = '⬇ 下载视频';
-                downloadBtn.disabled = false;
+                setDownloadLoading(false);
+                downloadBtn.querySelector('.btn-text').textContent = '⬇ 下载视频';
                 downloadBtn.title = '';
                 previewBtn.textContent = '▶ 在线预览';
                 copyLinkBtn.textContent = '🔗 复制直链';
@@ -153,6 +363,19 @@ function initEventListeners() {
         // 支持回车键
         manualVideoUrlInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') applyVideoUrlBtn.click();
+        });
+    }
+
+    // 代理配置
+    if (proxySaveBtn) {
+        proxySaveBtn.addEventListener('click', handleProxySave);
+    }
+    if (proxyClearBtn) {
+        proxyClearBtn.addEventListener('click', handleProxyClear);
+    }
+    if (proxyInput) {
+        proxyInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && proxySaveBtn) proxySaveBtn.click();
         });
     }
 }
@@ -245,13 +468,22 @@ async function handleParse() {
             }
             showStatus(statusBar, statusMsg, statusType);
         } else {
-            hideSkeleton();
-            resultPanel.style.display = 'none';
-            let errorMsg = result.message || '解析失败';
-            if (result.guide || result.hint) {
-                errorMsg += '\n\n' + (result.guide || result.hint);
+            // 直连解析失败时，尝试通过 CORS 代理中继获取页面 HTML
+            const relayResult = await _tryCorsProxyRelay(url);
+            if (relayResult && relayResult.data) {
+                currentVideoData = relayResult.data;
+                renderVideoResult(relayResult.data);
+                highlightPlatform(relayResult.data.platform);
+                showStatus(statusBar, `✅ 解析成功（CORS 代理中继）— ${PLATFORM_NAMES[relayResult.data.platform] || relayResult.data.platform}（${elapsed}s）`, 'success');
+            } else {
+                hideSkeleton();
+                resultPanel.style.display = 'none';
+                let errorMsg = result.message || '解析失败';
+                if (result.guide || result.hint) {
+                    errorMsg += '\n\n' + (result.guide || result.hint);
+                }
+                showStatus(statusBar, `❌ ${errorMsg}（${elapsed}s）`, 'error');
             }
-            showStatus(statusBar, `❌ ${errorMsg}（${elapsed}s）`, 'error');
         }
     } catch (err) {
         const elapsed = ((Date.now() - parseStartTime) / 1000).toFixed(1);
@@ -340,15 +572,16 @@ function renderVideoResult(data) {
     }
 
     // 根据是否有视频链接设置按钮状态
+    setDownloadLoading(false);
     if (isWechatNoUrl) {
         // 视频号但无直链：显示提示信息
-        downloadBtn.textContent = '⚠ 需要抓包获取直链';
+        downloadBtn.querySelector('.btn-text').textContent = '⚠ 需要抓包获取直链';
         downloadBtn.disabled = true;
         downloadBtn.title = '视频号需要抓包工具获取视频直链';
         previewBtn.textContent = '▶ 查看封面';
         copyLinkBtn.textContent = '🔗 复制封面链接';
     } else {
-        downloadBtn.textContent = isVideo ? '⬇ 下载视频' : '⬇ 下载全部';
+        downloadBtn.querySelector('.btn-text').textContent = isVideo ? '⬇ 下载视频' : '⬇ 下载全部';
         downloadBtn.disabled = false;
         downloadBtn.title = '';
         previewBtn.textContent = isVideo ? '▶ 在线预览' : '🖼 查看图片';
@@ -385,6 +618,13 @@ function renderVideoResult(data) {
 }
 
 // ─── 下载 ────────────────────────────────────────
+function setDownloadLoading(loading) {
+    /** 设置下载按钮加载状态 */
+    downloadBtn.querySelector('.btn-text').style.display = loading ? 'none' : 'inline';
+    downloadBtn.querySelector('.btn-loading').style.display = loading ? 'inline-flex' : 'none';
+    downloadBtn.disabled = loading;
+}
+
 async function handleDownload() {
     const isImage = currentVideoData?.note_type === 'image' || (currentVideoData?.image_list?.length > 0);
 
@@ -401,17 +641,24 @@ async function handleDownload() {
 
     if (!currentVideoData?.video_url) { showToast('无可用下载地址', 'error'); return; }
 
-    downloadBtn.disabled = true;
+    setDownloadLoading(true);
     progressBar.style.display = 'block';
     progressFill.style.width = '0%';
     progressText.textContent = '0%';
+    showStatus(statusBar, '⏳ 正在获取视频...', 'info');
 
     try {
-        // 优先使用无水印直链（直接 HTTP 下载，速度快）
-        // 无直链时回退到 video_url（可能为 yt:// / tt:// / bl:// / wx:// 特殊协议）
         const videoUrl = currentVideoData.video_url_no_watermark || currentVideoData.video_url || '';
         const title = (currentVideoData.title || 'video').substring(0, 50);
         const ref = getReferer(currentVideoData.platform);
+
+        // 对于需要中继的平台（如 TikTok），优先客户端直连下载（浏览器使用客户端的代理/VPN）
+        if (NEEDS_RELAY.includes(currentVideoData.platform)) {
+            const done = await _relayDownload(videoUrl, title, ref);
+            if (done) return;
+            // 客户端下载失败，回退到服务端下载
+        }
+
         const resp = await fetch(`${API_BASE}/api/download?video_url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title)}&referer=${encodeURIComponent(ref)}`);
 
         if (!resp.ok) {
@@ -427,14 +674,65 @@ async function handleDownload() {
         a.click();
         URL.revokeObjectURL(a.href);
         showToast('下载完成', 'success');
+        setDownloadLoading(false);
         progressFill.style.width = '100%';
         progressText.textContent = '100%';
+        showStatus(statusBar, '✅ 下载完成', 'success');
     } catch (err) {
         showToast(`下载失败: ${err.message}`, 'error');
+        setDownloadLoading(false);
     } finally {
-        downloadBtn.disabled = false;
-        setTimeout(() => { progressBar.style.display = 'none'; }, 2000);
+        setDownloadLoading(false);
+        setTimeout(() => { progressBar.style.display = 'none'; }, 3000);
     }
+}
+
+// 客户端直连下载（利用浏览器所在设备的代理/VPN）
+async function _relayDownload(videoUrl, title, ref) {
+    // 先尝试直接 fetch 视频（客户端代理会处理连接）
+    try {
+        showStatus(statusBar, '🔄 尝试客户端直连下载...', 'info');
+        const resp = await fetch(videoUrl, {
+            headers: { 'Referer': ref, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            signal: AbortSignal.timeout(30000),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${title}.mp4`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        showToast('下载完成', 'success');
+        progressFill.style.width = '100%';
+        progressText.textContent = '100%';
+        showStatus(statusBar, '✅ 下载完成', 'success');
+        return true;
+    } catch {
+        // 直连失败，尝试通过 CORS 代理下载
+        try {
+            showStatus(statusBar, '🔄 尝试通过 CORS 代理下载...', 'info');
+            for (const buildProxyUrl of CORS_PROXIES) {
+                try {
+                    const proxyUrl = buildProxyUrl(videoUrl);
+                    const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(30000) });
+                    if (!resp.ok) continue;
+                    const blob = await resp.blob();
+                    if (blob.size < 10240) continue;
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${title}.mp4`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    showToast('下载完成（CORS 代理）', 'success');
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '100%';
+                    return true;
+                } catch { continue; }
+            }
+        } catch { /* 所有方式都失败，回退到服务端下载 */ }
+    }
+    return false;
 }
 
 // ─── 图片选择操作 ────────────────────────────────
@@ -510,13 +808,13 @@ async function downloadImagesByIndices(indices) {
             const pct = Math.round((done / total) * 100);
             progressFill.style.width = pct + '%';
             progressText.textContent = `${done}/${total}`;
-            downloadBtn.textContent = `⬇ 下载中 ${done}/${total}`;
+            downloadBtn.querySelector(".btn-text").textContent = `⬇ ${done}/${total}`;
             await new Promise(r => setTimeout(r, 300));
         } catch (e) {
             showToast(`第 ${i + 1} 张下载失败`, 'error');
         }
     }
-    downloadBtn.textContent = `⬇ 下载全部`;
+    downloadBtn.querySelector('.btn-text').textContent = `⬇ 下载全部`;
     downloadBtn.disabled = false;
     setTimeout(() => { progressBar.style.display = 'none'; }, 1500);
     showToast(`${done}/${total} 张图片下载完成`, done === total ? 'success' : 'warning');
@@ -816,6 +1114,27 @@ document.addEventListener('click', (e) => {
 
 async function doDownload(videoUrl, title, platform) {
     try {
+        // 需要中继的平台优先客户端直连
+        if (NEEDS_RELAY.includes(platform)) {
+            const ref = getReferer(platform || '');
+            try {
+                const resp = await fetch(videoUrl, {
+                    headers: { 'Referer': ref, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                    signal: AbortSignal.timeout(15000),
+                });
+                if (resp.ok) {
+                    const blob = await resp.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${(title || 'video').substring(0, 50)}.mp4`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    showToast('下载完成', 'success');
+                    return;
+                }
+            } catch { /* 回退到服务端 */ }
+        }
+
         const ref = getReferer(platform || '');
         const resp = await fetch(`${API_BASE}/api/download?video_url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title || 'video')}&referer=${encodeURIComponent(ref)}`);
         if (!resp.ok) throw new Error('下载失败');

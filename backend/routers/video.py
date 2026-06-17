@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from parsers import parse_link, batch_parse
 from parsers._utils import _is_safe_url, _extract_url
 
-from config import DOWNLOAD_DIR, HTTP_PROXY
+from config import DOWNLOAD_DIR, get_active_proxy
 from deps import (
     ParseRequest, BatchParseRequest,
     _get_client_ip, _add_to_history,
@@ -219,8 +219,10 @@ async def download_video(
                 "merge_output_format": "mp4",
                 "nocheckcertificate": True,
             }
-            if HTTP_PROXY and platform_name == "TikTok":
-                ydl_opts["proxy"] = HTTP_PROXY
+            # TikTok 只使用客户端手动配置的代理，跳过系统自动检测的代理
+            proxy = get_active_proxy(client_only=True) if platform_name == "TikTok" else get_active_proxy()
+            if proxy:
+                ydl_opts["proxy"] = proxy
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([page_url])
 
@@ -328,6 +330,29 @@ async def download_video(
 
 # ─── Cookie 管理 ──────────────────────────────────────
 
+class ParseHtmlRequest(BaseModel):
+    url: str
+    html: str
+
+
+@router.post("/api/parse-html")
+async def parse_html_endpoint(req: ParseHtmlRequest, request: Request):
+    """解析前端通过 CORS 代理获取的页面 HTML（用于服务端无法直连的平台）"""
+    from parsers.tiktok import parse_html as tiktok_parse_html
+
+    ip = _get_client_ip(request)
+    html_len = len(req.html)
+    logger.info(f"[解析-HTML] 收到前端中继 HTML ({html_len} bytes): {req.url[:80]}...")
+
+    result = tiktok_parse_html(req.html, req.url)
+    if result["success"] and result["data"]:
+        logger.info(f"[解析-HTML] 中继解析成功: {result['data'].get('title', '')[:50]}")
+        _add_to_history(result["data"], ip)
+    else:
+        logger.warning(f"[解析-HTML] 中继解析失败: {result.get('message', '')} (HTML {html_len} bytes)")
+    return result
+
+
 class CookieUpdateRequest(BaseModel):
     cookie: str
 
@@ -347,3 +372,33 @@ async def cookie_status():
     """检查视频号 cookie 是否已配置"""
     from parsers.wechat_channels import YUANBAO_COOKIE
     return {"configured": bool(YUANBAO_COOKIE), "length": len(YUANBAO_COOKIE)}
+
+
+# ─── 代理配置 ──────────────────────────────────────
+
+class ProxyConfigRequest(BaseModel):
+    proxy: str
+
+
+@router.post("/api/proxy-config")
+async def set_proxy_config(req: ProxyConfigRequest):
+    """设置客户端代理地址（热更新，无需重启服务）"""
+    from config import set_client_proxy, get_active_proxy
+    proxy = req.proxy.strip()
+    if proxy and not proxy.startswith(("http://", "https://", "socks5://", "socks4://")):
+        raise HTTPException(status_code=400, detail="代理格式无效，请使用 http://ip:port 或 socks5://ip:port")
+    set_client_proxy(proxy)
+    active = get_active_proxy()
+    logger.info(f"[代理] 已更新: {proxy or '（清除）'}, 当前有效: {active or '（无）'}")
+    return {"success": True, "proxy": proxy}
+
+
+@router.get("/api/proxy-config")
+async def get_proxy_config():
+    """查看当前代理配置状态"""
+    from config import get_active_proxy, HTTP_PROXY, _CLIENT_PROXY
+    return {
+        "client_proxy": _CLIENT_PROXY,
+        "auto_detected": bool(HTTP_PROXY),
+        "active": get_active_proxy() or "",
+    }

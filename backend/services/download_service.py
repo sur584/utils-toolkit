@@ -14,7 +14,7 @@ from pathlib import Path
 
 import httpx
 
-from config import HTTP_PROXY
+from config import get_active_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +136,12 @@ class DownloadService:
                 "merge_output_format": "mp4",
                 "nocheckcertificate": True,
             }
-            if platform_key == "tt://" and HTTP_PROXY:
-                ydl_opts["proxy"] = HTTP_PROXY
+            if platform_key == "tt://":
+                proxy = get_active_proxy(client_only=True)
+            else:
+                proxy = get_active_proxy()
+            if proxy:
+                ydl_opts["proxy"] = proxy
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([page_url])
 

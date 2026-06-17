@@ -46,6 +46,28 @@ def _detect_proxy() -> str:
 
 HTTP_PROXY = _detect_proxy()
 
+# ─── 运行时代理配置（通过前端设置，覆盖自动检测）────────
+# 用于客户端设备有代理但服务端无代理的场景
+# 格式: http://192.168.1.18:7890
+_CLIENT_PROXY: str = ""  # 运行时由 API 热更新
+
+
+def get_active_proxy(client_only: bool = False) -> str:
+    """返回当前有效的代理地址
+    Args:
+        client_only: 仅返回客户端手动配置的代理（跳过自动检测）。
+            用于 TikTok 等被国内代理 geo-block 的平台。
+    """
+    if client_only:
+        return _CLIENT_PROXY
+    return _CLIENT_PROXY or HTTP_PROXY
+
+
+def set_client_proxy(proxy: str) -> None:
+    """设置客户端代理地址（热更新，无需重启服务）"""
+    global _CLIENT_PROXY
+    _CLIENT_PROXY = proxy.strip()
+
 # ─── 路径常量 ─────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent

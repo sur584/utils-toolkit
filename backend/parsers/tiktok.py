@@ -9,11 +9,9 @@ from typing import Dict, Any, Optional
 import httpx
 
 from ._utils import _follow_redirects, _make_info, _empty_result, _ok
-from config import HTTP_PROXY
+from config import get_active_proxy
 
 logger = logging.getLogger(__name__)
-
-_PROXY = HTTP_PROXY
 
 DOMAINS = ["vm.tiktok.com", "www.tiktok.com", "tiktok.com"]
 
@@ -23,14 +21,13 @@ _MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit
 
 
 def _tt_headers(mobile: bool = False, lang: str = "en") -> Dict[str, str]:
-    """TikTok 专用请求头 — 英语语言+模拟 cookie 绕过 geo 重定向"""
+    """基础请求头（不含 Cookie，供 yt-dlp 使用）"""
     return {
         "User-Agent": _MOBILE_UA if mobile else _DESKTOP_UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9" if lang == "en" else "zh-CN,zh;q=0.9,en;q=0.8",
         "Accept-Encoding": "gzip, deflate, br",
         "Referer": "https://www.tiktok.com/",
-        "Cookie": "tt_webid=1; tt_csrf_token=1; tt_chain_token=1",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
@@ -39,14 +36,23 @@ def _tt_headers(mobile: bool = False, lang: str = "en") -> Dict[str, str]:
     }
 
 
+def _tt_headers_with_cookie(mobile: bool = False, lang: str = "en") -> Dict[str, str]:
+    """HTTP 抓取用请求头（含假 cookie，绕过 geo 重定向）"""
+    h = _tt_headers(mobile, lang)
+    h["Cookie"] = "tt_webid=1; tt_csrf_token=1; tt_chain_token=1"
+    return h
+
+
 async def _tt_fetch(url: str, mobile: bool = True) -> Optional[str]:
     """TikTok 专用 fetch — 不跟随重定向，检测 geo 跳转"""
     try:
-        client_kwargs = dict(timeout=20, verify=False, follow_redirects=False)
-        if _PROXY:
-            client_kwargs["proxies"] = _PROXY
+        proxy = get_active_proxy(client_only=True)
+        timeout = 8 if not proxy else 20
+        client_kwargs = dict(timeout=timeout, verify=False, follow_redirects=False)
+        if proxy:
+            client_kwargs["proxies"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as c:
-            r = await c.get(url, headers=_tt_headers(mobile=mobile))
+            r = await c.get(url, headers=_tt_headers_with_cookie(mobile=mobile))
             if r.status_code == 200:
                 # 检查是否被重定向到地区页面
                 if "/hk/" in str(r.url) or "/about" in str(r.url):
@@ -66,17 +72,21 @@ async def _parse_via_ytdlp(video_id: str, username: str) -> Optional[Dict[str, A
     """使用 yt-dlp 兜底解析 TikTok 视频信息"""
     page_url = f"https://www.tiktok.com/{username}/video/{video_id}"
 
+    # 无代理时缩短超时，快速降级到前端中继
+    proxy = get_active_proxy(client_only=True)
+    timeout = 8 if not proxy else 30
+
     def _extract():
         import yt_dlp
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "nocheckcertificate": True,
-            "socket_timeout": 30,
+            "socket_timeout": timeout,
             "http_headers": _tt_headers(mobile=False, lang="en"),
         }
-        if _PROXY:
-            ydl_opts["proxy"] = _PROXY
+        if proxy:
+            ydl_opts["proxy"] = proxy
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(page_url, download=False)
 
@@ -131,15 +141,19 @@ async def parse(url: str) -> Dict[str, Any]:
     user_match = re.search(r"/(@[\w.-]+)/", url)
     username = user_match.group(1) if user_match else "@"
 
-    # 优先使用 yt-dlp 解析（内置反爬处理，比直接 HTTP 抓取可靠）
+    # 无客户端代理时，跳过后端解析（yt-dlp/直连皆因 geo 封锁失败），
+    # 让前端通过 CORS 中继（oEmbed）获取基础信息，节省 20s+ 等待时间。
+    if not get_active_proxy(client_only=True):
+        logger.info("TikTok: 无客户端代理，跳过后端解析，由前端 CORS 中继处理")
+        return _empty_result("TikTok 页面解析失败")
+
+    # 有客户端代理时，通过代理访问 TikTok（代理在客户端，IP 不受 geo 限制）
     item = await _parse_via_ytdlp(video_id, username)
 
-    # yt-dlp 失败时，降级到 HTML 页面抓取（英语头 + 不跟随重定向）
     if not item:
         logger.info("yt-dlp 解析失败，尝试 HTML 页面抓取...")
         html = await _tt_fetch(f"https://www.tiktok.com/{username}/video/{video_id}", mobile=True)
         if not html:
-            # 换桌面头再试一次
             html = await _tt_fetch(f"https://www.tiktok.com/{username}/video/{video_id}", mobile=False)
         if html:
             item = _parse_html(html)
@@ -147,6 +161,11 @@ async def parse(url: str) -> Dict[str, Any]:
     if not item:
         return _empty_result("TikTok 页面解析失败")
 
+    return _build_result(item, video_id, username)
+
+
+def _build_result(item: Dict[str, Any], video_id: str, username: str) -> Dict[str, Any]:
+    """将解析到的 item 构建为标准返回格式"""
     author = item.get("author", {}) or {}
     video_info = item.get("video", {})
     stats = item.get("stats", {}) or item.get("statsV2", {})
@@ -171,26 +190,88 @@ async def parse(url: str) -> Dict[str, Any]:
     ))
 
 
+def parse_html(html: str, url: str) -> Dict[str, Any]:
+    """从外部提供的 HTML 解析 TikTok 视频信息（供前端中继使用）"""
+    import re
+    m = re.search(r"/video/(\d+)", url)
+    video_id = m.group(1) if m else ""
+    user_match = re.search(r"/(@[\w.-]+)/", url)
+    username = user_match.group(1) if user_match else "@"
+    item = _parse_html(html)
+    if not item:
+        return _empty_result("TikTok 页面解析失败")
+    return _build_result(item, video_id, username)
+
+
 def _parse_html(html: str) -> Optional[Dict[str, Any]]:
     """从 TikTok HTML 页面中提取视频信息"""
     item = None
 
+    # 调试：检查关键模式是否存在
+    has_playaddr = "playAddr" in html
+    has_sigi = 'id="SIGI_STATE"' in html
+    has_next = "__NEXT_DATA__" in html
+    logger.info(f"TikTok HTML 特征: playAddr={has_playaddr}, SIGI_STATE={has_sigi}, __NEXT_DATA__={has_next}, 长度={len(html)}")
+
     # 尝试新格式：script 标签中的 JSON（videoDetail.itemInfo.itemStruct）
-    scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
-    for s in scripts:
-        if "playAddr" in s:
-            json_match = re.search(r'\{.*"playAddr".*\}', s, re.DOTALL)
-            if json_match:
-                try:
-                    data = json.loads(json_match.group(0))
-                    item_struct = (data.get("videoDetail", {})
-                                   .get("itemInfo", {})
-                                   .get("itemStruct", {}))
-                    if item_struct:
-                        item = item_struct
-                        break
-                except Exception:
-                    continue
+    if has_playaddr:
+        scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
+        for s in scripts:
+            if "playAddr" not in s:
+                continue
+            # 去除 JS 变量赋值前缀和尾部分号，尝试作为纯 JSON 解析
+            cleaned = s.strip()
+            for prefix in ["window.__INITIAL_STATE__ = ", "window.__DATA__ = ", "window.__remixContext = ", "var ", "let ", "const "]:
+                if cleaned.startswith(prefix):
+                    cleaned = cleaned[len(prefix):]
+                    break
+            if cleaned.endswith(";"):
+                cleaned = cleaned[:-1]
+            try:
+                data = json.loads(cleaned)
+                item_struct = (data.get("videoDetail", {})
+                               .get("itemInfo", {})
+                               .get("itemStruct", {}))
+                if item_struct:
+                    item = item_struct
+                    break
+            except json.JSONDecodeError:
+                pass
+            # 兜底：以 "playAddr" 为锚点，用括号匹配提取外层 JSON 对象
+            try:
+                idx = s.index('"playAddr"')
+                # 从 idx 向左找到最近的根级 {
+                depth = 0
+                start = idx
+                while start > 0:
+                    start -= 1
+                    ch = s[start]
+                    if ch == '}':
+                        depth += 1
+                    elif ch == '{':
+                        if depth == 0:
+                            break
+                        depth -= 1
+                # 从 start 向右找到匹配的 }
+                depth = 1
+                end = start
+                while end < len(s) - 1 and depth > 0:
+                    end += 1
+                    ch = s[end]
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                candidate = s[start:end + 1]
+                data = json.loads(candidate)
+                item_struct = (data.get("videoDetail", {})
+                               .get("itemInfo", {})
+                               .get("itemStruct", {}))
+                if item_struct:
+                    item = item_struct
+                    break
+            except Exception:
+                continue
 
     # 兼容旧格式：SIGI_STATE / __NEXT_DATA__
     if not item:
