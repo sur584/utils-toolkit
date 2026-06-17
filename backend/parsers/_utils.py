@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from config import HTTP_PROXY
+
 logger = logging.getLogger(__name__)
 
 MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
@@ -60,7 +62,10 @@ async def _follow_redirects(url: str, timeout: float = 10.0) -> str:
 
 async def _fetch(url: str, headers: Dict = None, timeout: float = 15.0, follow: bool = True) -> Optional[str]:
     try:
-        async with httpx.AsyncClient(timeout=timeout, verify=False, follow_redirects=follow) as c:
+        client_kwargs = dict(timeout=timeout, verify=False, follow_redirects=follow)
+        if HTTP_PROXY:
+            client_kwargs["proxies"] = HTTP_PROXY
+        async with httpx.AsyncClient(**client_kwargs) as c:
             r = await c.get(url, headers=headers or _headers())
             if r.status_code == 200:
                 return r.text

@@ -3,6 +3,7 @@
 """
 
 import os
+import platform
 import logging
 from pathlib import Path
 
@@ -14,6 +15,36 @@ if _env_file.exists():
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
+
+# ─── 全局 HTTP 代理自动检测 ──────────────────────────
+# 优先级: .env 中的 HTTP_PROXY > 环境变量 > Windows 系统代理设置 > 直连
+def _detect_proxy() -> str:
+    # 1. 环境变量（.env 已写入 os.environ）
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            return val
+
+    # 2. Windows 系统代理设置
+    if platform.system() == "Windows":
+        try:
+            import winreg
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+            ) as key:
+                enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
+                server = winreg.QueryValueEx(key, "ProxyServer")[0]
+                if enabled and server:
+                    if not server.startswith("http://") and not server.startswith("https://"):
+                        server = f"http://{server}"
+                    return server
+        except Exception:
+            pass
+
+    return ""
+
+HTTP_PROXY = _detect_proxy()
 
 # ─── 路径常量 ─────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent

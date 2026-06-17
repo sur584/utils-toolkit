@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from parsers import parse_link, batch_parse
 from parsers._utils import _is_safe_url, _extract_url
 
-from config import DOWNLOAD_DIR
+from config import DOWNLOAD_DIR, HTTP_PROXY
 from deps import (
     ParseRequest, BatchParseRequest,
     _get_client_ip, _add_to_history,
@@ -219,6 +219,8 @@ async def download_video(
                 "merge_output_format": "mp4",
                 "nocheckcertificate": True,
             }
+            if HTTP_PROXY and platform_name == "TikTok":
+                ydl_opts["proxy"] = HTTP_PROXY
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([page_url])
 

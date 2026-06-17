@@ -14,6 +14,8 @@ from pathlib import Path
 
 import httpx
 
+from config import HTTP_PROXY
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,6 +136,8 @@ class DownloadService:
                 "merge_output_format": "mp4",
                 "nocheckcertificate": True,
             }
+            if platform_key == "tt://" and HTTP_PROXY:
+                ydl_opts["proxy"] = HTTP_PROXY
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([page_url])
 

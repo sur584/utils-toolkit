@@ -9,8 +9,11 @@ from typing import Dict, Any, Optional
 import httpx
 
 from ._utils import _follow_redirects, _make_info, _empty_result, _ok
+from config import HTTP_PROXY
 
 logger = logging.getLogger(__name__)
+
+_PROXY = HTTP_PROXY
 
 DOMAINS = ["vm.tiktok.com", "www.tiktok.com", "tiktok.com"]
 
@@ -39,7 +42,10 @@ def _tt_headers(mobile: bool = False, lang: str = "en") -> Dict[str, str]:
 async def _tt_fetch(url: str, mobile: bool = True) -> Optional[str]:
     """TikTok 专用 fetch — 不跟随重定向，检测 geo 跳转"""
     try:
-        async with httpx.AsyncClient(timeout=20, verify=False, follow_redirects=False) as c:
+        client_kwargs = dict(timeout=20, verify=False, follow_redirects=False)
+        if _PROXY:
+            client_kwargs["proxies"] = _PROXY
+        async with httpx.AsyncClient(**client_kwargs) as c:
             r = await c.get(url, headers=_tt_headers(mobile=mobile))
             if r.status_code == 200:
                 # 检查是否被重定向到地区页面
@@ -69,6 +75,8 @@ async def _parse_via_ytdlp(video_id: str, username: str) -> Optional[Dict[str, A
             "socket_timeout": 30,
             "http_headers": _tt_headers(mobile=False, lang="en"),
         }
+        if _PROXY:
+            ydl_opts["proxy"] = _PROXY
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(page_url, download=False)
 
