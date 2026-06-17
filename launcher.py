@@ -23,6 +23,7 @@ def check_and_install_deps():
         ('uvicorn', 'uvicorn'),
         ('pydantic', 'pydantic'),
         ('multipart', 'python-multipart'),
+        ('dotenv', 'python-dotenv'),  # 核心依赖：transcript/settings.py 无条件导入
     ]
     optional = [
         ('yt_dlp', 'yt-dlp'),
@@ -34,7 +35,6 @@ def check_and_install_deps():
         ('simple_lama_inpainting', 'simple-lama-inpainting'),
         # 视频文案提取（transcript）
         ('opencc', 'opencc-python-reimplemented'),
-        ('dotenv', 'python-dotenv'),
         ('aiofiles', 'aiofiles'),
         ('faster_whisper', 'faster-whisper'),
     ]
@@ -97,7 +97,20 @@ def check_and_install_deps():
             )
             print(f'  [OK] 可选依赖安装完成')
         except Exception:
-            print(f'  [WARN] 可选依赖安装失败（抠图/去文字功能将不可用）')
+            # 尝试无代理模式再试一次（与核心依赖相同的逻辑）
+            env = os.environ.copy()
+            for k in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+                env.pop(k, None)
+            try:
+                subprocess.check_call(
+                    [sys.executable, '-m', 'pip', 'install', '--no-proxy'] + missing_opt,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+                )
+                print(f'  [OK] 可选依赖安装完成（无代理模式）')
+            except Exception:
+                print(f'  [WARN] 可选依赖安装失败（抠图/去文字功能将不可用）')
+                print(f'         可手动执行: {sys.executable} -m pip install {" ".join(missing_opt)}')
+                print(f'         如遇网络问题，可尝试配置代理或使用国内镜像源')
 
 
 def get_lan_ip():

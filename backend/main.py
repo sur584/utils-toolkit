@@ -16,9 +16,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from deps import model_manager, disk_cache
-from routers import video, bg_remove, text_remove, watermark, watermark_removal, upscale, history, static, transcript
+from routers import video, bg_remove, text_remove, watermark, watermark_removal, upscale, history, static
 
 logger = logging.getLogger(__name__)
+
+# 安全导入 transcript 模块（依赖缺失时优雅降级）
+TRANSCRIPT_AVAILABLE = False
+try:
+    from routers import transcript
+    TRANSCRIPT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"transcript 模块加载失败: {e} — 视频文案提取功能将不可用")
+    logger.warning(f"可尝试手动修复: {sys.executable} -m pip install python-dotenv aiofiles faster-whisper")
 
 
 @asynccontextmanager
@@ -77,7 +86,13 @@ app.include_router(watermark_removal.router)
 app.include_router(upscale.router)
 app.include_router(history.router)
 app.include_router(static.router)
-app.include_router(transcript.router)
+
+# transcript 路由仅在依赖可用时注册
+if TRANSCRIPT_AVAILABLE:
+    try:
+        app.include_router(transcript.router)
+    except Exception as e:
+        logger.warning(f"transcript 路由注册失败: {e} — 视频文案提取功能将不可用")
 
 # ─── 静态文件挂载 & 404 处理 ──────────────────────────
 # 必须在路由注册之后，以保证 API 路由优先匹配

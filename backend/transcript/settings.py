@@ -9,8 +9,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 logger = logging.getLogger(__name__)
 
 # This module's directory (backend/transcript/)
@@ -19,10 +17,14 @@ _MODULE_DIR: Path = Path(__file__).resolve().parent
 # Project root is three levels above this file (backend/transcript/settings.py)
 PROJECT_ROOT: Path = _MODULE_DIR.parent.parent
 
-# Load transcript .env (if any)
+# Load transcript .env (if any) - 使用惰性导入，dotenv 缺失不崩溃
 _env_file = _MODULE_DIR / ".env"
 if _env_file.exists():
-    load_dotenv(_env_file)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_file)
+    except ImportError:
+        logger.warning("python-dotenv 未安装，跳过 .env 文件加载")
 
 # Model name to local path mapping
 _MODEL_NAMES = {
