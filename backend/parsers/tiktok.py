@@ -6,11 +6,54 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional
 
-from ._utils import _headers, _fetch, _follow_redirects, _make_info, _empty_result, _ok
+import httpx
+
+from ._utils import _follow_redirects, _make_info, _empty_result, _ok
 
 logger = logging.getLogger(__name__)
 
 DOMAINS = ["vm.tiktok.com", "www.tiktok.com", "tiktok.com"]
+
+# TikTok 专用浏览器头 — 使用英语环境绕过地区重定向
+_DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+_MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+
+
+def _tt_headers(mobile: bool = False, lang: str = "en") -> Dict[str, str]:
+    """TikTok 专用请求头 — 英语语言+模拟 cookie 绕过 geo 重定向"""
+    return {
+        "User-Agent": _MOBILE_UA if mobile else _DESKTOP_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9" if lang == "en" else "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://www.tiktok.com/",
+        "Cookie": "tt_webid=1; tt_csrf_token=1; tt_chain_token=1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+    }
+
+
+async def _tt_fetch(url: str, mobile: bool = True) -> Optional[str]:
+    """TikTok 专用 fetch — 不跟随重定向，检测 geo 跳转"""
+    try:
+        async with httpx.AsyncClient(timeout=20, verify=False, follow_redirects=False) as c:
+            r = await c.get(url, headers=_tt_headers(mobile=mobile))
+            if r.status_code == 200:
+                # 检查是否被重定向到地区页面
+                if "/hk/" in str(r.url) or "/about" in str(r.url):
+                    logger.warning(f"TikTok 地区重定向: {r.url}")
+                    return None
+                return r.text
+            if r.status_code == 302:
+                loc = r.headers.get("location", "")
+                logger.warning(f"TikTok 302 重定向: {loc}")
+                return None
+    except Exception as e:
+        logger.warning(f"TikTok fetch 失败: {type(e).__name__}: {e}")
+    return None
 
 
 async def _parse_via_ytdlp(video_id: str, username: str) -> Optional[Dict[str, Any]]:
@@ -23,6 +66,8 @@ async def _parse_via_ytdlp(video_id: str, username: str) -> Optional[Dict[str, A
             "quiet": True,
             "no_warnings": True,
             "nocheckcertificate": True,
+            "socket_timeout": 30,
+            "http_headers": _tt_headers(mobile=False, lang="en"),
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(page_url, download=False)
@@ -81,11 +126,13 @@ async def parse(url: str) -> Dict[str, Any]:
     # 优先使用 yt-dlp 解析（内置反爬处理，比直接 HTTP 抓取可靠）
     item = await _parse_via_ytdlp(video_id, username)
 
-    # yt-dlp 失败时，降级到 HTML 页面抓取
+    # yt-dlp 失败时，降级到 HTML 页面抓取（英语头 + 不跟随重定向）
     if not item:
         logger.info("yt-dlp 解析失败，尝试 HTML 页面抓取...")
-        html = await _fetch(f"https://www.tiktok.com/{username}/video/{video_id}",
-                            headers=_headers(referer="https://www.tiktok.com/", mobile=True))
+        html = await _tt_fetch(f"https://www.tiktok.com/{username}/video/{video_id}", mobile=True)
+        if not html:
+            # 换桌面头再试一次
+            html = await _tt_fetch(f"https://www.tiktok.com/{username}/video/{video_id}", mobile=False)
         if html:
             item = _parse_html(html)
 
