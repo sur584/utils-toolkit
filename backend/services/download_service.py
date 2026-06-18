@@ -117,6 +117,12 @@ class DownloadService:
             page_url = url_template.format(vid)
         filepath = self.downloads_dir / f"{safe_title}.mp4"
 
+        # TikTok 无客户端代理时快速失败，避免 20s 超时等待
+        if platform_key == "tt://" and not get_active_proxy(client_only=True):
+            raise RuntimeError(
+                "TikTok 下载需要客户端代理，请在页面配置代理地址后重试"
+            )
+
         # 如果已有有效文件，直接返回
         if is_valid_video(filepath):
             return str(filepath)

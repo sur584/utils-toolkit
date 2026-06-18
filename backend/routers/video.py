@@ -209,6 +209,13 @@ async def download_video(
         if filepath.exists():
             filepath.unlink()
 
+        # TikTok 无客户端代理时快速失败，避免 20s 超时等待
+        if platform_name == "TikTok" and not get_active_proxy(client_only=True):
+            raise HTTPException(
+                status_code=500,
+                detail="TikTok 下载需要客户端代理，请在页面配置代理地址后重试"
+            )
+
         def _download_with_ytdlp():
             import yt_dlp
             ydl_opts = {
