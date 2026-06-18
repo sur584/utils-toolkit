@@ -72,6 +72,7 @@ async function _tryCorsProxyRelay(url) {
                         digg_count: 0,
                         comment_count: 0,
                         share_count: 0,
+                        is_relay_only: true,  // 标记：仅元数据，下载需要代理
                     }
                 };
             }
@@ -398,6 +399,7 @@ function showStatus(container, message, type = 'info') {
     container.textContent = '';
     const span = document.createElement('span');
     span.className = 'status-text';
+    span.style.whiteSpace = 'pre-line';
     span.textContent = message;
     container.appendChild(span);
 }
@@ -474,7 +476,7 @@ async function handleParse() {
                 currentVideoData = relayResult.data;
                 renderVideoResult(relayResult.data);
                 highlightPlatform(relayResult.data.platform);
-                showStatus(statusBar, `✅ 解析成功（CORS 代理中继）— ${PLATFORM_NAMES[relayResult.data.platform] || relayResult.data.platform}（${elapsed}s）`, 'success');
+                showStatus(statusBar, `✅ 解析成功（CORS 代理中继）— ${PLATFORM_NAMES[relayResult.data.platform] || relayResult.data.platform}\n\n⚠️ 下载需要配置客户端代理或设备开启 VPN（${elapsed}s）`, 'warning');
             } else {
                 hideSkeleton();
                 resultPanel.style.display = 'none';
@@ -639,6 +641,15 @@ async function handleDownload() {
         return;
     }
 
+    // TikTok CORS 中继模式：需要代理才能下载
+    if (currentVideoData?.platform === 'tiktok' && currentVideoData?.is_relay_only) {
+        const hasProxy = proxyInput?.value && proxyInput.value.trim().length > 0;
+        if (!hasProxy) {
+            showToast('TikTok 下载需要配置客户端代理（或设备开启 VPN），请在页面上方配置代理地址', 'warning');
+            return;
+        }
+    }
+
     if (!currentVideoData?.video_url) { showToast('无可用下载地址', 'error'); return; }
 
     setDownloadLoading(true);
@@ -689,6 +700,11 @@ async function handleDownload() {
 
 // 客户端直连下载（利用浏览器所在设备的代理/VPN）
 async function _relayDownload(videoUrl, title, ref) {
+    // tt:// / yt:// / bl:// 不是真实 URL，跳过客户端直连尝试
+    if (videoUrl.startsWith('tt://') || videoUrl.startsWith('yt://') || videoUrl.startsWith('bl://')) {
+        return false;
+    }
+
     // 先尝试直接 fetch 视频（客户端代理会处理连接）
     try {
         showStatus(statusBar, '🔄 尝试客户端直连下载...', 'info');
