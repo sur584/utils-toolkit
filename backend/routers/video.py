@@ -188,8 +188,8 @@ async def download_video(
     """下载视频文件"""
     if not video_url:
         raise HTTPException(status_code=400, detail="视频 URL 不能为空")
-    # yt-dlp 前缀（yt:// / tt:// / bl://）跳过 URL 安全检查，因为它们不直接 fetch
-    if not (video_url.startswith("yt://") or video_url.startswith("tt://") or video_url.startswith("bl://")):
+    # yt-dlp 前缀（yt:// / tt:// / bl:// / tw://）跳过 URL 安全检查，因为它们不直接 fetch
+    if not (video_url.startswith("yt://") or video_url.startswith("tt://") or video_url.startswith("bl://") or video_url.startswith("tw://")):
         if not _is_safe_url(video_url):
             raise HTTPException(status_code=403, detail="不允许访问该地址")
 
@@ -211,17 +211,23 @@ async def download_video(
             return False
         return False
 
-    # yt-dlp 下载（YouTube / TikTok / B站 等需要特殊处理的平台）
-    if video_url.startswith("yt://") or video_url.startswith("tt://") or video_url.startswith("bl://"):
+    # yt-dlp 下载（YouTube / TikTok / B站 / Twitter 等需要特殊处理的平台）
+    if video_url.startswith("yt://") or video_url.startswith("tt://") or video_url.startswith("bl://") or video_url.startswith("tw://"):
         is_youtube = video_url.startswith("yt://")
         is_bilibili = video_url.startswith("bl://")
-        vid = video_url[5:]  # skip "yt://" / "tt://" / "bl://"
+        is_twitter = video_url.startswith("tw://")
+        vid = video_url[5:]  # skip "yt://" / "tt://" / "bl://" / "tw://"
         if is_youtube:
             page_url = f"https://www.youtube.com/watch?v={vid}"
             platform_name = "YouTube"
         elif is_bilibili:
             page_url = f"https://www.bilibili.com/video/{vid}"
             platform_name = "B站"
+        elif is_twitter:
+            if not vid.isdigit():
+                raise HTTPException(status_code=400, detail="无效的 Twitter/X 视频 ID")
+            page_url = f"https://x.com/i/status/{vid}"
+            platform_name = "Twitter/X"
         else:
             # tt://@{username}/{video_id} 或 tt://{video_id}（旧格式）
             if vid.startswith("@"):
