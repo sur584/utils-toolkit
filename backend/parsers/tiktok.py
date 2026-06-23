@@ -46,7 +46,7 @@ def _tt_headers_with_cookie(mobile: bool = False, lang: str = "en") -> Dict[str,
 async def _tt_fetch(url: str, mobile: bool = True) -> Optional[str]:
     """TikTok 专用 fetch — 不跟随重定向，检测 geo 跳转"""
     try:
-        proxy = get_active_proxy(client_only=True)
+        proxy = get_active_proxy()
         timeout = 8 if not proxy else 20
         client_kwargs = dict(timeout=timeout, verify=False, follow_redirects=False)
         if proxy:
@@ -72,8 +72,8 @@ async def _parse_via_ytdlp(video_id: str, username: str) -> Optional[Dict[str, A
     """使用 yt-dlp 兜底解析 TikTok 视频信息"""
     page_url = f"https://www.tiktok.com/{username}/video/{video_id}"
 
-    # 无代理时缩短超时，快速降级到前端中继
-    proxy = get_active_proxy(client_only=True)
+    # 无代理时缩短超时，快速降级到 oEmbed 兜底
+    proxy = get_active_proxy()
     timeout = 8 if not proxy else 30
 
     def _extract():
@@ -127,6 +127,43 @@ async def _parse_via_ytdlp(video_id: str, username: str) -> Optional[Dict[str, A
         return None
 
 
+async def _parse_via_oembed(url: str) -> Optional[Dict[str, Any]]:
+    try:
+        proxy = get_active_proxy()
+        client_kwargs = dict(timeout=15, verify=False, follow_redirects=True)
+        if proxy:
+            client_kwargs["proxies"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            resp = await client.get(
+                "https://www.tiktok.com/oembed",
+                params={"url": url.split("?")[0]},
+                headers={"User-Agent": _DESKTOP_UA},
+            )
+        if resp.status_code != 200:
+            logger.warning(f"TikTok oEmbed 返回 {resp.status_code}")
+            return None
+        data = resp.json()
+        author_name = data.get("author_name", "")
+        if not author_name:
+            return None
+        return {
+            "desc": data.get("title", "") or "无标题",
+            "author": {
+                "uniqueId": author_name.replace("@", ""),
+                "nickname": author_name,
+            },
+            "video": {
+                "playAddr": "",
+                "cover": data.get("thumbnail_url", ""),
+                "duration": 0,
+            },
+            "stats": {},
+        }
+    except Exception as e:
+        logger.warning(f"TikTok oEmbed 解析失败: {type(e).__name__}: {e}")
+        return None
+
+
 async def parse(url: str) -> Dict[str, Any]:
     url = url.rstrip("/")
     if "vm.tiktok.com" in url:
@@ -141,11 +178,12 @@ async def parse(url: str) -> Dict[str, Any]:
     user_match = re.search(r"/(@[\w.-]+)/", url)
     username = user_match.group(1) if user_match else "@"
 
-    # 无客户端代理时，跳过后端解析（yt-dlp/直连皆因 geo 封锁失败），
-    # 让前端通过 CORS 中继（oEmbed）获取基础信息，节省 20s+ 等待时间。
-    if not get_active_proxy(client_only=True):
-        logger.info("TikTok: 无客户端代理，跳过后端解析，由前端 CORS 中继处理")
-        return _empty_result("TikTok 页面解析失败")
+    # 无可用代理时，跳过后端解析，让前端通过同源 oEmbed 兜底获取基础信息。
+    if not get_active_proxy():
+        logger.info("TikTok: 无可用代理，跳过后端解析，由前端同源 oEmbed 处理")
+        result = _empty_result("TikTok 需要可访问 TikTok 的网络或代理")
+        result["retry"] = False
+        return result
 
     # 有客户端代理时，通过代理访问 TikTok（代理在客户端，IP 不受 geo 限制）
     item = await _parse_via_ytdlp(video_id, username)
@@ -157,6 +195,10 @@ async def parse(url: str) -> Dict[str, Any]:
             html = await _tt_fetch(f"https://www.tiktok.com/{username}/video/{video_id}", mobile=False)
         if html:
             item = _parse_html(html)
+
+    if not item:
+        logger.info("HTML 页面解析失败，尝试 oEmbed 解析...")
+        item = await _parse_via_oembed(f"https://www.tiktok.com/{username}/video/{video_id}")
 
     if not item:
         return _empty_result("TikTok 页面解析失败")

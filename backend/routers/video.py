@@ -97,6 +97,34 @@ async def parse_video(req: ParseRequest, request: Request):
     return result
 
 
+@router.get("/api/tiktok-oembed")
+async def tiktok_oembed(url: str = Query(...)):
+    """通过后端获取 TikTok oEmbed 元数据，避免公共 CORS 代理不可用。"""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if not _is_safe_url(url) or not (host == "tiktok.com" or host.endswith(".tiktok.com")):
+        raise HTTPException(status_code=400, detail="仅支持 TikTok 链接")
+    try:
+        proxy = get_active_proxy()
+        client_kwargs = dict(timeout=15, verify=False, follow_redirects=True)
+        if proxy:
+            client_kwargs["proxies"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            resp = await client.get(
+                "https://www.tiktok.com/oembed",
+                params={"url": url},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"TikTok oEmbed 返回 {resp.status_code}")
+        return resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"TikTok oEmbed 请求失败: {type(e).__name__}")
+
+
 @router.post("/api/batch-parse")
 async def batch_parse_videos(req: BatchParseRequest, request: Request):
     """批量解析（最多 20 个）"""
@@ -209,11 +237,11 @@ async def download_video(
         if filepath.exists():
             filepath.unlink()
 
-        # TikTok 无客户端代理时快速失败，避免 20s 超时等待
-        if platform_name == "TikTok" and not get_active_proxy(client_only=True):
+        # TikTok 无可用代理时快速失败，避免 20s 超时等待
+        if platform_name == "TikTok" and not get_active_proxy():
             raise HTTPException(
                 status_code=500,
-                detail="TikTok 下载需要客户端代理，请在页面配置代理地址后重试"
+                detail="TikTok 下载需要可访问 TikTok 的网络或代理，请配置代理地址后重试"
             )
 
         def _download_with_ytdlp():
@@ -226,8 +254,7 @@ async def download_video(
                 "merge_output_format": "mp4",
                 "nocheckcertificate": True,
             }
-            # TikTok 只使用客户端手动配置的代理，跳过系统自动检测的代理
-            proxy = get_active_proxy(client_only=True) if platform_name == "TikTok" else get_active_proxy()
+            proxy = get_active_proxy()
             if proxy:
                 ydl_opts["proxy"] = proxy
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

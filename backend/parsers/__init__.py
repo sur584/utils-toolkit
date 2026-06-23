@@ -65,7 +65,7 @@ def _set_cache(url: str, result: Dict[str, Any]):
 async def _parse_with_retry(url: str, platform: str, parser_func) -> Dict[str, Any]:
     """带单次重试的解析"""
     result = await parser_func(url)
-    if not result["success"]:
+    if not result["success"] and result.get("retry") is not False:
         logger.info(f"Parse failed for {platform}, retrying once...")
         await asyncio.sleep(1.0)
         result = await parser_func(url)

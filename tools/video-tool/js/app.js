@@ -21,6 +21,25 @@ const PLATFORM_NAMES = {
     wechat_channels: '微信视频号', direct: '直接链接',
 };
 
+async function readJsonResponse(resp, apiName = '接口') {
+    const text = await resp.text();
+    const trimmed = text.trim();
+
+    if (!trimmed) {
+        throw new Error(`${apiName}返回为空（HTTP ${resp.status}）`);
+    }
+
+    if (trimmed.startsWith('<')) {
+        throw new Error(`${apiName}返回了 HTML 页面，不是 JSON。请确认后端 API 路由存在（HTTP ${resp.status}）`);
+    }
+
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        throw new Error(`${apiName}返回的不是有效 JSON（HTTP ${resp.status}）`);
+    }
+}
+
 // ─── 平台检测 & CORS 中继 ─────────────────────────
 function _detectPlatform(url) {
     const patterns = {
@@ -45,14 +64,17 @@ async function _tryCorsProxyRelay(url) {
     const videoId = vidMatch ? vidMatch[1] : '';
     const username = userMatch ? userMatch[1] : '@';
 
-    // 通过 CORS 代理调用 TikTok oEmbed API（官方公开接口，返回标准 JSON）
     const cleanUrl = url.split('?')[0];
     const apiUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(cleanUrl)}`;
-    for (const buildProxyUrl of CORS_PROXIES) {
+    const oembedUrls = [
+        `${API_BASE}/api/tiktok-oembed?url=${encodeURIComponent(cleanUrl)}`,
+        ...CORS_PROXIES.map((buildProxyUrl) => buildProxyUrl(apiUrl)),
+    ];
+
+    for (const oembedUrl of oembedUrls) {
         try {
-            const proxyUrl = buildProxyUrl(apiUrl);
-            showStatus(statusBar, `🔄 通过 CORS 代理获取 TikTok 数据...`, 'info');
-            const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+            showStatus(statusBar, `🔄 获取 TikTok 数据...`, 'info');
+            const resp = await fetch(oembedUrl, { signal: AbortSignal.timeout(15000) });
             if (!resp.ok) continue;
             const text = await resp.text();
             if (!text || text.length < 20) continue;
@@ -72,7 +94,7 @@ async function _tryCorsProxyRelay(url) {
                         digg_count: 0,
                         comment_count: 0,
                         share_count: 0,
-                        is_relay_only: true,  // 标记：仅元数据，下载需要代理
+                        is_relay_only: true,
                     }
                 };
             }
@@ -89,7 +111,7 @@ async function _tryCorsProxyRelay(url) {
 async function loadProxyStatus() {
     try {
         const resp = await fetch(`${API_BASE}/api/proxy-config`);
-        const data = await resp.json();
+        const data = await readJsonResponse(resp, '代理配置接口');
         if (proxyInput) proxyInput.value = data.client_proxy || '';
         updateProxyStatus(data.active);
     } catch { /* 忽略 */ }
@@ -117,7 +139,7 @@ async function handleProxySave() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ proxy }),
         });
-        const data = await resp.json();
+        const data = await readJsonResponse(resp, '保存代理配置接口');
         if (data.success) {
             showToast('代理配置已保存', 'success');
             updateProxyStatus(proxy || '');
@@ -247,7 +269,7 @@ async function autoDetectProxy() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ proxy: proxyUrl }),
             });
-            const data = await resp.json();
+            const data = await readJsonResponse(resp, '自动配置代理接口');
             if (data.success) {
                 updateProxyStatus(proxyUrl);
                 if (proxyInput) proxyInput.value = proxyUrl;
@@ -453,7 +475,7 @@ async function handleParse() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url }),
         });
-        const result = await resp.json();
+        const result = await readJsonResponse(resp, '视频解析接口');
         const elapsed = ((Date.now() - parseStartTime) / 1000).toFixed(1);
 
         if (result.success && result.data) {
@@ -481,7 +503,9 @@ async function handleParse() {
                 hideSkeleton();
                 resultPanel.style.display = 'none';
                 let errorMsg = result.message || '解析失败';
-                if (result.guide || result.hint) {
+                if (_detectPlatform(url) === 'tiktok') {
+                    errorMsg += '\n\nTikTok 需要开启可访问 TikTok 的网络，或在上方配置 HTTP 代理地址。';
+                } else if (result.guide || result.hint) {
                     errorMsg += '\n\n' + (result.guide || result.hint);
                 }
                 showStatus(statusBar, `❌ ${errorMsg}（${elapsed}s）`, 'error');
@@ -673,8 +697,14 @@ async function handleDownload() {
         const resp = await fetch(`${API_BASE}/api/download?video_url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title)}&referer=${encodeURIComponent(ref)}`);
 
         if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${resp.status}`);
+            let detail = `HTTP ${resp.status}`;
+            try {
+                const err = await readJsonResponse(resp, '下载接口');
+                detail = err.detail || detail;
+            } catch (e) {
+                detail = `${detail}: ${e.message}`;
+            }
+            throw new Error(detail);
         }
 
         const blob = await resp.blob();
@@ -1002,7 +1032,7 @@ async function handleBatchParse() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ urls }),
         });
-        const { results } = await resp.json();
+        const { results } = await readJsonResponse(resp, '批量解析接口');
         let ok = 0;
         results.forEach((r) => { if (r.success) ok++; renderBatchItem(r); });
         showStatus(batchStatus, `完成: ${ok}/${urls.length} 成功`, ok === urls.length ? 'success' : 'warning');
@@ -1043,7 +1073,8 @@ function renderBatchItem(result) {
 // ─── 历史记录 ────────────────────────────────────
 async function loadHistory() {
     try {
-        const { history } = await (await fetch(`${API_BASE}/api/history`)).json();
+        const resp = await fetch(`${API_BASE}/api/history`);
+        const { history } = await readJsonResponse(resp, '历史记录接口');
         historyList.querySelectorAll('.history-item').forEach((el) => el.remove());
         if (!history?.length) { historyEmpty.style.display = 'block'; return; }
         historyEmpty.style.display = 'none';
