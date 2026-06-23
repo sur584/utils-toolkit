@@ -3,6 +3,7 @@
 """
 
 import asyncio
+import ipaddress
 import logging
 
 import httpx
@@ -431,6 +432,56 @@ async def set_proxy_config(req: ProxyConfigRequest):
     active = get_active_proxy()
     logger.info(f"[代理] 已更新: {proxy or '（清除）'}, 当前有效: {active or '（无）'}")
     return {"success": True, "proxy": proxy}
+
+
+async def _test_client_proxy(proxy: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=4, verify=False, proxies=proxy) as client:
+            resp = await client.get(
+                "https://www.tiktok.com/oembed",
+                params={"url": "https://www.tiktok.com/@tiktok/video/7106594312292453678"},
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+        return resp.status_code in (200, 400, 404)
+    except Exception:
+        return False
+
+
+@router.post("/api/proxy-config/auto-detect")
+async def auto_detect_proxy_config(request: Request):
+    """根据访问者 IP 探测常见代理端口并自动配置。"""
+    from config import set_client_proxy, get_active_proxy
+
+    client_ip = request.client.host if request.client else ""
+    try:
+        ip_obj = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return {"success": False, "message": "无法识别客户端 IP", "client_ip": client_ip}
+
+    if not (ip_obj.is_private or ip_obj.is_loopback):
+        return {"success": False, "message": "仅支持局域网或本机客户端自动检测", "client_ip": client_ip}
+
+    ports = [7890, 7891, 7892, 10809, 1080, 1081, 8080, 3128, 8888, 1088]
+    for port in ports:
+        proxy = f"http://{client_ip}:{port}"
+        if await _test_client_proxy(proxy):
+            set_client_proxy(proxy)
+            active = get_active_proxy()
+            logger.info(f"[代理] 自动检测成功: {proxy}")
+            return {"success": True, "proxy": proxy, "active": active, "client_ip": client_ip}
+
+    return {"success": False, "message": "未检测到可用客户端代理，请确认代理软件已开启局域网连接", "client_ip": client_ip}
+
+
+@router.get("/api/logs/recent")
+async def recent_logs(lines: int = Query(200, ge=1, le=1000)):
+    """临时查看最近后端日志，便于局域网设备测试排查。"""
+    from config import BASE_DIR
+    log_file = BASE_DIR / "app.log"
+    if not log_file.exists():
+        return {"success": True, "lines": []}
+    text = log_file.read_text(encoding="utf-8", errors="replace")
+    return {"success": True, "lines": text.splitlines()[-lines:]}
 
 
 @router.get("/api/proxy-config")

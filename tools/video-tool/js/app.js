@@ -196,6 +196,7 @@ const previewFallback = $('#previewFallback');
 const closeModalBtn = $('#closeModal');
 const themeToggle = $('#themeToggle');
 const proxyInput = $('#proxyInput');
+const proxyDetectBtn = $('#proxyDetectBtn');
 const proxySaveBtn = $('#proxySaveBtn');
 const proxyClearBtn = $('#proxyClearBtn');
 const proxyStatus = $('#proxyStatus');
@@ -205,82 +206,33 @@ let selectedImages = new Set();
 
 // ─── 代理自动检测 ────────────────────────────────
 
-// 常见代理端口（Clash/V2Ray/Surge 等客户端的默认端口）
-const COMMON_PROXY_PORTS = [7890, 7891, 10809, 1080, 1081, 8080, 3128, 8888, 1088];
-
-async function _getLocalIP() {
-    /** 通过 WebRTC 获取客户端内网 IP */
-    try {
-        const pc = new RTCPeerConnection({ iceServers: [] });
-        pc.createDataChannel('');
-        const ip = await new Promise((resolve) => {
-            pc.onicecandidate = (e) => {
-                if (!e || !e.candidate) return;
-                const m = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
-                if (m) { resolve(m[1]); pc.close(); }
-            };
-            pc.createOffer().then(o => pc.setLocalDescription(o));
-            setTimeout(() => resolve(null), 3000);
-        });
-        pc.close();
-        return ip;
-    } catch { return null; }
-}
-
-async function _testPort(ip, port) {
-    /** 检测客户端指定端口是否开放（能建立 TCP 连接） */
-    try {
-        const resp = await fetch(`http://${ip}:${port}`, {
-            mode: 'no-cors',
-            signal: AbortSignal.timeout(2000),
-        });
-        return true;
-    } catch { return false; }
-}
-
-async function autoDetectProxy() {
-    /** 自动检测客户端代理地址并配置到后端 */
-    if (proxyStatus && proxyStatus.textContent.includes('（未配置）') === false && proxyStatus.textContent.includes('自动检测') === false) {
-        return; // 已有代理配置，跳过
-    }
+async function autoDetectProxy(silent = true) {
+    if (proxyStatus && proxyStatus.textContent.includes('（未配置）') === false && silent) return;
     const origStatus = proxyStatus ? proxyStatus.textContent : '';
 
-    // 显示检测中状态
     if (proxyStatus) {
-        proxyStatus.textContent = '（正在检测代理...）';
+        proxyStatus.textContent = '（正在检测客户端代理...）';
         proxyStatus.style.color = 'var(--warning, #f59e0b)';
     }
+    if (proxyDetectBtn) proxyDetectBtn.disabled = true;
 
-    const ip = await _getLocalIP();
-    if (!ip) {
+    try {
+        const resp = await fetch(`${API_BASE}/api/proxy-config/auto-detect`, { method: 'POST' });
+        const data = await readJsonResponse(resp, '自动检测代理接口');
+        if (data.success) {
+            updateProxyStatus(data.active || data.proxy);
+            if (proxyInput) proxyInput.value = data.proxy || '';
+            if (!silent) showToast(`已检测到代理: ${data.proxy}`, 'success');
+            return;
+        }
         if (proxyStatus) proxyStatus.textContent = origStatus || '（未配置）';
-        return;
+        if (!silent) showToast(data.message || '未检测到可用代理', 'warning');
+    } catch (err) {
+        if (proxyStatus) proxyStatus.textContent = origStatus || '（未配置）';
+        if (!silent) showToast(`自动检测失败: ${err.message}`, 'error');
+    } finally {
+        if (proxyDetectBtn) proxyDetectBtn.disabled = false;
     }
-
-    for (const port of COMMON_PROXY_PORTS) {
-        const open = await _testPort(ip, port);
-        if (!open) continue;
-
-        const proxyUrl = `http://${ip}:${port}`;
-        // 找到开放端口，自动配置到后端
-        try {
-            const resp = await fetch(`${API_BASE}/api/proxy-config`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ proxy: proxyUrl }),
-            });
-            const data = await readJsonResponse(resp, '自动配置代理接口');
-            if (data.success) {
-                updateProxyStatus(proxyUrl);
-                if (proxyInput) proxyInput.value = proxyUrl;
-                console.log(`[代理] 自动检测到: ${proxyUrl}`);
-                return;
-            }
-        } catch { /* 继续尝试 */ }
-    }
-
-    // 未检测到任何可用代理
-    if (proxyStatus) proxyStatus.textContent = origStatus || '（未配置）';
 }
 
 
@@ -390,6 +342,9 @@ function initEventListeners() {
     }
 
     // 代理配置
+    if (proxyDetectBtn) {
+        proxyDetectBtn.addEventListener('click', () => autoDetectProxy(false));
+    }
     if (proxySaveBtn) {
         proxySaveBtn.addEventListener('click', handleProxySave);
     }

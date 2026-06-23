@@ -57,27 +57,21 @@ async def parse(url: str) -> Dict[str, Any]:
             elif formats:
                 video_url = formats[-1].get("url", "")
 
-        return _ok(_make_info(
-            id=tweet_id,
-            platform="twitter",
-            title=info.get("title") or info.get("description") or "Twitter/X 视频",
-            author=info.get("uploader") or info.get("uploader_id") or "未知作者",
-            cover=info.get("thumbnail") or "",
-            duration=info.get("duration") or 0,
-            video_url=f"tw://{tweet_id}",
-            video_url_no_watermark=video_url,
-            digg_count=info.get("like_count") or 0,
-            comment_count=info.get("comment_count") or 0,
-            share_count=info.get("repost_count") or 0,
-        ))
+        if video_url:
+            return _ok(_make_info(
+                id=tweet_id,
+                platform="twitter",
+                title=info.get("title") or info.get("description") or "Twitter/X 视频",
+                author=info.get("uploader") or info.get("uploader_id") or "未知作者",
+                cover=info.get("thumbnail") or "",
+                duration=info.get("duration") or 0,
+                video_url=f"tw://{tweet_id}",
+                video_url_no_watermark=video_url,
+                digg_count=info.get("like_count") or 0,
+                comment_count=info.get("comment_count") or 0,
+                share_count=info.get("repost_count") or 0,
+            ))
 
-    embed_url = f"https://platform.twitter.com/embed/Tweet.html?id={tweet_id}"
-    result = _ok(_make_info(
-        id=tweet_id,
-        platform="twitter",
-        title="Twitter/X 视频",
-        video_url=embed_url,
-        video_url_no_watermark=embed_url,
-    ))
-    result["message"] = "仅获取到推文嵌入页，未解析到视频直链"
+    result = _empty_result("Twitter/X 需要服务器能访问 x.com/api.x.com；请在部署机器配置可用代理")
+    result["retry"] = False
     return result
