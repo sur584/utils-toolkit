@@ -65,35 +65,22 @@ class WatermarkRemovalService:
         }
         p = params.get(sensitivity, params["medium"])
 
-        # 多种检测方法
-        masks = []
+        corner_mask = self._detect_corner_watermarks(img_array, sensitivity)
+        corner_area = int(np.sum(corner_mask > 0))
+        if 20 <= corner_area <= w * h * 0.025:
+            return self._postprocess(corner_mask, w, h, {**p, "min_area": 20})
 
-        # 1. 边缘检测 + 形态学
-        edge_mask = self._detect_by_edge(img_array, p)
-        masks.append(edge_mask)
+        tiled_mask = self._detect_tiled_watermarks(img_array, sensitivity)
+        tiled_area = int(np.sum(tiled_mask > 0))
+        if w * h * 0.005 <= tiled_area <= w * h * 0.28:
+            return tiled_mask
 
-        # 2. OCR 文字检测
-        ocr_mask = self._detect_by_ocr(img_array)
-        if ocr_mask is not None:
-            masks.append(ocr_mask)
+        ocr_mask = self._detect_safe_ocr_watermark(img_array)
+        ocr_area = int(np.sum(ocr_mask > 0))
+        if w * h * 0.002 <= ocr_area <= w * h * 0.075:
+            return self._postprocess(ocr_mask, w, h, {**p, "min_area": 20})
 
-        # 3. 亮度/对比度异常检测
-        bright_mask = self._detect_by_brightness(img_array)
-        masks.append(bright_mask)
-
-        # 4. 颜色异常检测（半透明水印常见白色/灰色）
-        color_mask = self._detect_by_color(img_array)
-        masks.append(color_mask)
-
-        # 合并所有检测结果
-        combined = np.zeros((h, w), dtype=np.uint8)
-        for m in masks:
-            combined = cv2.bitwise_or(combined, m)
-
-        # 后处理
-        result = self._postprocess(combined, w, h, p)
-
-        return result
+        return np.zeros((h, w), dtype=np.uint8)
 
     def _detect_by_edge(self, img_array: np.ndarray, params: dict) -> np.ndarray:
         """边缘检测找水印轮廓"""
@@ -139,6 +126,34 @@ class WatermarkRemovalService:
             logger.warning(f"OCR检测失败: {e}")
 
         return None
+
+    def _detect_safe_ocr_watermark(self, img_array: np.ndarray) -> np.ndarray:
+        cv2 = self.cv2
+        h, w = img_array.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+        if self.ocr is False:
+            return mask
+
+        try:
+            result = self.ocr(img_array)
+            if not result or not result[0]:
+                return mask
+            for item in result[0]:
+                bbox = item[0]
+                if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+                    continue
+                pts = np.array(bbox, dtype=np.int32)
+                x, y, bw, bh = cv2.boundingRect(pts)
+                area = bw * bh
+                near_edge = x < w * 0.18 or x + bw > w * 0.82 or y < h * 0.18 or y + bh > h * 0.82
+                small_text = area <= w * h * 0.03 and bw >= 8 and bh >= 8
+                if near_edge and small_text:
+                    cv2.fillPoly(mask, [pts], 255)
+        except Exception as e:
+            logger.warning(f"安全OCR检测失败: {e}")
+            return np.zeros((h, w), dtype=np.uint8)
+
+        return cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=2)
 
     def _detect_by_brightness(self, img_array: np.ndarray) -> np.ndarray:
         """检测亮度异常区域（水印通常较亮或较暗）"""
@@ -207,6 +222,251 @@ class WatermarkRemovalService:
 
         return result
 
+    def _detect_tiled_watermarks(self, img_array: np.ndarray, sensitivity: str) -> np.ndarray:
+        cv2 = self.cv2
+        h, w = img_array.shape[:2]
+        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+
+        local = cv2.GaussianBlur(gray, (0, 0), sigmaX=max(min(w, h) / 55, 9))
+        diff = cv2.absdiff(gray, local)
+        soft_text = cv2.inRange(hsv, np.array([0, 0, 70]), np.array([180, 80, 210]))
+        _, subtle = cv2.threshold(diff, {"low": 16, "medium": 12, "high": 9}.get(sensitivity, 12), 255, cv2.THRESH_BINARY)
+        candidate = cv2.bitwise_and(soft_text, subtle)
+
+        edges = cv2.Canny(gray, 18, 70)
+        candidate = cv2.bitwise_or(candidate, cv2.bitwise_and(edges, soft_text))
+        candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1)
+
+        grid_x, grid_y = 4, 5
+        cells = []
+        for gy in range(grid_y):
+            row = []
+            for gx in range(grid_x):
+                x1 = gx * w // grid_x
+                x2 = (gx + 1) * w // grid_x
+                y1 = gy * h // grid_y
+                y2 = (gy + 1) * h // grid_y
+                ratio = int(np.sum(candidate[y1:y2, x1:x2] > 0)) / max((x2 - x1) * (y2 - y1), 1)
+                row.append(ratio > 0.0008)
+            cells.append(row)
+
+        occupied = sum(1 for row in cells for hit in row if hit)
+        adjacent = 0
+        for gy in range(grid_y):
+            for gx in range(grid_x):
+                if not cells[gy][gx]:
+                    continue
+                if gx + 1 < grid_x and cells[gy][gx + 1]:
+                    adjacent += 1
+                if gy + 1 < grid_y and cells[gy + 1][gx]:
+                    adjacent += 1
+
+        coverage = int(np.sum(candidate > 0)) / max(w * h, 1)
+        repeated = occupied >= 5 and adjacent >= 3
+        if not repeated or not (0.002 <= coverage <= 0.16):
+            return np.zeros((h, w), dtype=np.uint8)
+
+        result = cv2.dilate(candidate, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=2)
+        result_area = int(np.sum(result > 0)) / max(w * h, 1)
+        if result_area > 0.18:
+            return np.zeros((h, w), dtype=np.uint8)
+        return result
+
+    def _detect_corner_watermarks(self, img_array: np.ndarray, sensitivity: str) -> np.ndarray:
+        cv2 = self.cv2
+        h, w = img_array.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+
+        roi_w = max(int(w * 0.28), 180)
+        roi_h = max(int(h * 0.18), 120)
+        margin = max(min(w, h) // 80, 8)
+        rois = [
+            (0, 0, min(roi_w, w), min(roi_h, h)),
+            (max(w - roi_w, 0), 0, w, min(roi_h, h)),
+            (0, max(h - roi_h, 0), min(roi_w, w), h),
+            (max(w - roi_w, 0), max(h - roi_h, 0), w, h),
+        ]
+        min_area = {"low": 80, "medium": 45, "high": 25}.get(sensitivity, 45)
+        max_area = max(int(w * h * 0.04), 2000)
+
+        for x1, y1, x2, y2 in rois:
+            roi_gray = gray[y1:y2, x1:x2]
+            roi_hsv = hsv[y1:y2, x1:x2]
+            if roi_gray.size == 0:
+                continue
+
+            bright = cv2.inRange(roi_hsv, np.array([0, 0, 145]), np.array([180, 95, 255]))
+            local = cv2.adaptiveThreshold(
+                roi_gray,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                31,
+                -6,
+            )
+            candidate = cv2.bitwise_and(bright, local)
+            candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1)
+            candidate = cv2.dilate(candidate, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(candidate, connectivity=8)
+            boxes = []
+            for i in range(1, num_labels):
+                area = stats[i, cv2.CC_STAT_AREA]
+                bw = stats[i, cv2.CC_STAT_WIDTH]
+                bh = stats[i, cv2.CC_STAT_HEIGHT]
+                if min_area <= area <= max_area and bw >= 3 and bh >= 3:
+                    x = stats[i, cv2.CC_STAT_LEFT]
+                    y = stats[i, cv2.CC_STAT_TOP]
+                    boxes.append((x, y, x + bw, y + bh))
+
+            if not boxes:
+                continue
+
+            bx1 = max(min(b[0] for b in boxes) - margin, 0)
+            by1 = max(min(b[1] for b in boxes) - margin, 0)
+            bx2 = min(max(b[2] for b in boxes) + margin, x2 - x1)
+            by2 = min(max(b[3] for b in boxes) + margin, y2 - y1)
+            box_w = bx2 - bx1
+            box_h = by2 - by1
+            if box_w * box_h <= max_area and box_w >= 12 and box_h >= 8:
+                mask[y1 + by1:y1 + by2, x1 + bx1:x1 + bx2] = 255
+
+        bottom_right = self._detect_bottom_right_signature(img_array)
+        return cv2.bitwise_or(mask, bottom_right)
+
+    def _detect_bottom_right_signature(self, img_array: np.ndarray) -> np.ndarray:
+        cv2 = self.cv2
+        h, w = img_array.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+        hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+
+        x1 = int(w * 0.62)
+        y1 = int(h * 0.74)
+        roi_hsv = hsv[y1:h, x1:w]
+        roi_gray = gray[y1:h, x1:w]
+        if roi_hsv.size == 0:
+            return mask
+
+        bright = cv2.inRange(roi_hsv, np.array([0, 0, 125]), np.array([180, 140, 255]))
+        dark = cv2.inRange(roi_hsv, np.array([0, 0, 0]), np.array([180, 160, 95]))
+        local = cv2.GaussianBlur(roi_gray, (0, 0), sigmaX=max(min(w, h) / 120, 5))
+        diff = cv2.absdiff(roi_gray, local)
+        _, contrast = cv2.threshold(diff, 10, 255, cv2.THRESH_BINARY)
+        edges = cv2.Canny(roi_gray, 24, 90)
+        candidate = cv2.bitwise_or(cv2.bitwise_or(bright, dark), cv2.bitwise_or(contrast, edges))
+        candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1)
+        candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 3)), iterations=2)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(candidate, connectivity=8)
+        boxes = []
+        for i in range(1, num_labels):
+            area = stats[i, cv2.CC_STAT_AREA]
+            bw = stats[i, cv2.CC_STAT_WIDTH]
+            bh = stats[i, cv2.CC_STAT_HEIGHT]
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            abs_x2 = x1 + x + bw
+            abs_y2 = y1 + y + bh
+            in_signature_zone = abs_x2 > w * 0.76 and abs_y2 > h * 0.82
+            text_like = 4 <= bh <= max(h * 0.08, 28) and 2 <= bw <= max(w * 0.24, 80)
+            if in_signature_zone and text_like and 4 <= area <= w * h * 0.01:
+                boxes.append((x, y, x + bw, y + bh))
+
+        if not boxes:
+            return mask
+
+        pad_x = max(w // 45, 20)
+        pad_y = max(h // 60, 14)
+        bx1 = max(x1 + min(b[0] for b in boxes) - pad_x, 0)
+        by1 = max(y1 + min(b[1] for b in boxes) - pad_y, 0)
+        bx2 = min(x1 + max(b[2] for b in boxes) + pad_x, w)
+        by2 = min(y1 + max(b[3] for b in boxes) + pad_y, h)
+        box_area = (bx2 - bx1) * (by2 - by1)
+        if box_area <= w * h * 0.035 and bx2 > w * 0.78 and by2 > h * 0.84:
+            mask[by1:by2, bx1:bx2] = 255
+        return mask
+
+    def _is_bottom_right_mask(self, mask: np.ndarray) -> bool:
+        cv2 = self.cv2
+        h, w = mask.shape
+        if int(np.sum(mask > 0)) <= 0:
+            return False
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        xs = []
+        ys = []
+        xe = []
+        ye = []
+        for i in range(1, num_labels):
+            if stats[i, cv2.CC_STAT_AREA] <= 0:
+                continue
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            bw = stats[i, cv2.CC_STAT_WIDTH]
+            bh = stats[i, cv2.CC_STAT_HEIGHT]
+            xs.append(x)
+            ys.append(y)
+            xe.append(x + bw)
+            ye.append(y + bh)
+        if not xs:
+            return False
+        x1, y1, x2, y2 = min(xs), min(ys), max(xe), max(ye)
+        area = (x2 - x1) * (y2 - y1)
+        return x2 > w * 0.76 and y2 > h * 0.80 and area <= w * h * 0.055
+
+    def _expand_bottom_right_mask(self, mask: np.ndarray) -> np.ndarray:
+        cv2 = self.cv2
+        h, w = mask.shape
+        expanded = mask.copy()
+        if not self._is_bottom_right_mask(mask):
+            return expanded
+        num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        for i in range(1, num_labels):
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            bw = stats[i, cv2.CC_STAT_WIDTH]
+            bh = stats[i, cv2.CC_STAT_HEIGHT]
+            corner_signature = x + bw > w * 0.76 and y + bh > h * 0.80 and bw * bh <= w * h * 0.045
+            if corner_signature:
+                pad_x = max(w // 80, 8)
+                pad_y = max(h // 90, 6)
+                expanded[max(y - pad_y, 0):min(y + bh + pad_y, h), max(x - pad_x, 0):min(x + bw + pad_x, w)] = 255
+        return expanded
+
+    def _prefill_edge_watermark(self, img_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        cv2 = self.cv2
+        prepared = img_bgr.copy()
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        h, w = mask.shape
+        for i in range(1, num_labels):
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            bw = stats[i, cv2.CC_STAT_WIDTH]
+            bh = stats[i, cv2.CC_STAT_HEIGHT]
+            near_edge = x + bw > w * 0.70 and y + bh > h * 0.78
+            if not near_edge or bw * bh > w * h * 0.06:
+                continue
+
+            sx1 = max(x - bw, 0)
+            sx2 = max(x - 4, 0)
+            sy1 = max(y, 0)
+            sy2 = min(y + bh, h)
+            if sx2 <= sx1 or sy2 <= sy1:
+                sy1 = max(y - bh, 0)
+                sy2 = max(y - 4, 0)
+                sx1 = max(x, 0)
+                sx2 = min(x + bw, w)
+            if sx2 <= sx1 or sy2 <= sy1:
+                continue
+
+            patch = prepared[sy1:sy2, sx1:sx2]
+            fill = cv2.resize(patch, (bw, bh), interpolation=cv2.INTER_LINEAR)
+            prepared[y:y + bh, x:x + bw] = fill
+        return prepared
+
     def _postprocess(self, mask: np.ndarray, w: int, h: int, params: dict) -> np.ndarray:
         """后处理：过滤噪点，保留合理大小区域"""
         cv2 = self.cv2
@@ -216,15 +476,23 @@ class WatermarkRemovalService:
 
         result = np.zeros_like(mask)
         max_area = w * h * 0.15  # 最大不超过15%面积
+        corner_margin = min(w, h) * 0.32
 
         for i in range(1, num_labels):
             area = stats[i, cv2.CC_STAT_AREA]
-            if params["min_area"] <= area <= max_area:
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            bw = stats[i, cv2.CC_STAT_WIDTH]
+            bh = stats[i, cv2.CC_STAT_HEIGHT]
+            in_corner = (x < corner_margin or x + bw > w - corner_margin) and (y < corner_margin or y + bh > h - corner_margin)
+            min_area = 20 if in_corner else params["min_area"]
+            if min_area <= area <= max_area:
                 result[labels == i] = 255
 
         # 膨胀确保覆盖
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         result = cv2.dilate(result, kernel, iterations=2)
+        result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel, iterations=1)
 
         return result
 
@@ -250,10 +518,61 @@ class WatermarkRemovalService:
         img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
 
         flags = cv2.INPAINT_NS if method == "ns" else cv2.INPAINT_TELEA
-        result = cv2.inpaint(img_bgr, mask, inpaintRadius=3, flags=flags)
+        final_mask = mask.copy()
+        corner_only = self._is_bottom_right_mask(final_mask)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        work_mask = cv2.dilate(final_mask, kernel, iterations=2 if corner_only else 1)
+        prepared = self._prefill_edge_watermark(img_bgr, work_mask)
+        radius = max(5, min(16, int(round(min(image.size) / 220)))) if corner_only else max(4, min(12, int(round(min(image.size) / 280))))
+        inpainted = cv2.inpaint(prepared, work_mask, inpaintRadius=radius, flags=flags)
+        result = img_bgr.copy()
+        result[final_mask > 0] = inpainted[final_mask > 0]
 
         result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
         return Image.fromarray(result_rgb)
+
+    def process_image_with_mask(
+        self,
+        image: Image.Image,
+        sensitivity: str = "medium",
+        method: str = "telea",
+    ) -> Tuple[Image.Image, np.ndarray, dict]:
+        image = image.convert("RGB")
+        mask = self._expand_bottom_right_mask(self.detect_watermark(image, sensitivity))
+        mask_area = int(np.sum(mask > 0))
+        if mask_area <= 100:
+            return image, mask, {"has_watermark": False, "mask_area": 0, "residual_area": 0, "iterations": 0}
+
+        result = self.remove_watermark(image, mask, method)
+        residual_area = 0
+        iterations = 1
+        bottom_right_only = self._is_bottom_right_mask(mask)
+        max_mask_area = image.width * image.height * (0.055 if bottom_right_only else 0.18)
+        for _ in range(3):
+            residual_mask = self.detect_watermark(result, sensitivity)
+            if bottom_right_only:
+                corner_zone = np.zeros_like(residual_mask)
+                corner_zone[int(image.height * 0.72):image.height, int(image.width * 0.60):image.width] = 255
+                residual_mask = self.cv2.bitwise_and(residual_mask, corner_zone)
+            residual_area = int(np.sum(residual_mask > 0))
+            if residual_area <= 100:
+                break
+            combined_mask = self.cv2.bitwise_or(mask, residual_mask)
+            combined_area = int(np.sum(combined_mask > 0))
+            if combined_area > max_mask_area:
+                break
+            mask = self._expand_bottom_right_mask(combined_mask)
+            mask_area = int(np.sum(mask > 0))
+            result = self.remove_watermark(image, mask, method)
+            iterations += 1
+
+        return result, mask, {
+            "has_watermark": True,
+            "mask_area": mask_area,
+            "residual_area": residual_area,
+            "iterations": iterations,
+        }
 
     def process_image(
         self,
@@ -261,51 +580,19 @@ class WatermarkRemovalService:
         sensitivity: str = "medium",
         method: str = "telea",
     ) -> Tuple[bytes, dict]:
-        """
-        处理单张图片：检测水印 → 去除水印
-
-        Returns:
-            (result_bytes, metadata)
-        """
         start = time.time()
-
-        image = Image.open(io.BytesIO(image_bytes))
-        image = image.convert("RGB")
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         original_size = image.size
-
-        # 限制尺寸
-        max_dim = 2048
-        if max(image.size) > max_dim:
-            ratio = max_dim / max(image.size)
-            new_size = (int(image.width * ratio), int(image.height * ratio))
-            image = image.resize(new_size, Image.Resampling.LANCZOS)
-
-        # 检测水印
-        mask = self.detect_watermark(image, sensitivity)
-        mask_area = int(np.sum(mask > 0))
-        has_watermark = mask_area > 100
-
-        if not has_watermark:
-            buf = io.BytesIO()
-            image.save(buf, format="PNG")
-            return buf.getvalue(), {
-                "has_watermark": False,
-                "mask_area": 0,
-                "processing_time_ms": int((time.time() - start) * 1000),
-            }
-
-        # 去除水印
-        result = self.remove_watermark(image, mask, method)
+        result, _, metadata = self.process_image_with_mask(image, sensitivity, method)
 
         buf = io.BytesIO()
         result.save(buf, format="PNG", quality=95)
-
-        return buf.getvalue(), {
-            "has_watermark": True,
-            "mask_area": mask_area,
+        metadata = {
+            **metadata,
             "original_size": f"{original_size[0]}x{original_size[1]}",
             "processing_time_ms": int((time.time() - start) * 1000),
         }
+        return buf.getvalue(), metadata
 
     def process_batch(
         self,

@@ -44,7 +44,7 @@ def is_valid_video(filepath: Path) -> bool:
     return False
 
 
-def sanitize_filename(title: str) -> str:
+def sanitize_filename(title: str, max_length: int = 80) -> str:
     """
     清理文件名，只保留安全字符。
 
@@ -54,7 +54,10 @@ def sanitize_filename(title: str) -> str:
     Returns:
         清理后的文件名，仅包含字母数字、空格、下划线和连字符
     """
-    return "".join(c for c in title if c.isalnum() or c in " _-").strip() or "video"
+    invalid_chars = '<>:"/\\|?*'
+    safe = "".join(c for c in title if c not in invalid_chars and ord(c) >= 32)
+    safe = " ".join(safe.split()).strip(" ._-")
+    return (safe[:max_length].rstrip(" ._-") or "video")
 
 
 class DownloadService:

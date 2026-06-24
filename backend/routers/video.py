@@ -3,6 +3,7 @@
 """
 
 import asyncio
+import hashlib
 import ipaddress
 import logging
 
@@ -194,7 +195,14 @@ async def download_video(
         if not _is_safe_url(video_url):
             raise HTTPException(status_code=403, detail="不允许访问该地址")
 
-    safe_title = "".join(c for c in title if c.isalnum() or c in " _-").strip() or "video"
+    def _sanitize_filename(value: str, max_length: int = 80) -> str:
+        invalid_chars = '<>:"/\\|?*'
+        safe = "".join(c for c in value if c not in invalid_chars and ord(c) >= 32)
+        safe = " ".join(safe.split()).strip(" ._-")
+        return (safe[:max_length].rstrip(" ._-") or "video")
+
+    display_title = _sanitize_filename(title)
+    storage_title = f"{display_title}-{hashlib.sha1(video_url.encode('utf-8')).hexdigest()[:10]}"
 
     def _is_valid_video(p):
         """检查文件是否为有效视频（而非加密/错误文件）"""
@@ -236,10 +244,10 @@ async def download_video(
             else:
                 page_url = f"https://www.tiktok.com/@/video/{vid}"
             platform_name = "TikTok"
-        filepath = DOWNLOAD_DIR / f"{safe_title}.mp4"
+        filepath = DOWNLOAD_DIR / f"{storage_title}.mp4"
 
         if _is_valid_video(filepath):
-            return FileResponse(path=str(filepath), filename=f"{safe_title}.mp4", media_type="video/mp4")
+            return FileResponse(path=str(filepath), filename=f"{display_title}.mp4", media_type="video/mp4")
 
         if filepath.exists():
             filepath.unlink()
@@ -270,12 +278,12 @@ async def download_video(
         try:
             await asyncio.to_thread(_download_with_ytdlp)
             if not filepath.exists():
-                for f in DOWNLOAD_DIR.glob(f"{safe_title}.*"):
+                for f in DOWNLOAD_DIR.glob(f"{storage_title}.*"):
                     filepath = f
                     break
             if not _is_valid_video(filepath):
                 raise HTTPException(status_code=500, detail=f"{platform_name} 下载失败: 下载的文件不是有效视频")
-            return FileResponse(path=str(filepath), filename=f"{safe_title}.mp4", media_type="video/mp4")
+            return FileResponse(path=str(filepath), filename=f"{display_title}.mp4", media_type="video/mp4")
         except HTTPException:
             raise
         except Exception as e:
@@ -289,10 +297,10 @@ async def download_video(
         decrypt_key = parts[1] if len(parts) > 1 else None
         logger.info(f"[下载] 微信视频号: url={actual_url[:100]}..., key={decrypt_key}")
 
-        filepath = DOWNLOAD_DIR / f"{safe_title}.mp4"
+        filepath = DOWNLOAD_DIR / f"{storage_title}.mp4"
 
         if _is_valid_video(filepath):
-            return FileResponse(path=str(filepath), filename=f"{safe_title}.mp4", media_type="video/mp4")
+            return FileResponse(path=str(filepath), filename=f"{display_title}.mp4", media_type="video/mp4")
 
         if filepath.exists():
             filepath.unlink()
@@ -327,7 +335,7 @@ async def download_video(
                         detail="视频解密后无法播放，可能解密密钥不正确或视频格式不支持"
                     )
 
-            return FileResponse(path=str(filepath), filename=f"{safe_title}.mp4", media_type="video/mp4")
+            return FileResponse(path=str(filepath), filename=f"{display_title}.mp4", media_type="video/mp4")
         except httpx.TimeoutException:
             raise HTTPException(status_code=504, detail="下载超时")
         except HTTPException:
@@ -335,8 +343,8 @@ async def download_video(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"微信视频下载失败: {str(e)}")
 
-    filename = f"{safe_title}.mp4"
-    filepath = DOWNLOAD_DIR / filename
+    filename = f"{display_title}.mp4"
+    filepath = DOWNLOAD_DIR / f"{storage_title}.mp4"
 
     if filepath.exists() and filepath.stat().st_size > 0:
         return FileResponse(path=str(filepath), filename=filename, media_type="video/mp4")
@@ -461,7 +469,7 @@ async def auto_detect_proxy_config(request: Request):
     if not (ip_obj.is_private or ip_obj.is_loopback):
         return {"success": False, "message": "仅支持局域网或本机客户端自动检测", "client_ip": client_ip}
 
-    ports = [7890, 7891, 7892, 10809, 1080, 1081, 8080, 3128, 8888, 1088]
+    ports = [7890, 7897, 7891, 7892, 7893, 7899, 10809, 10808, 1080, 1081, 8080, 3128, 8888, 1088]
     for port in ports:
         proxy = f"http://{client_ip}:{port}"
         if await _test_client_proxy(proxy):

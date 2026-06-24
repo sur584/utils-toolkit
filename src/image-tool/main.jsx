@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import { fmt, ext, isImg, uid, showToast } from '../shared/utils.js';
 import { Upload, Download, X, Trash, Plus, Refresh } from '../shared/icons.jsx';
@@ -10,13 +10,15 @@ const sub=fn=>{_ls.add(fn);return()=>_ls.delete(fn)};
 const notify=()=>_ls.forEach(fn=>fn());
 const addImages=files=>{
   const v=Array.from(files).filter(isImg);if(!v.length)return;
-  const n=v.map(f=>({id:uid(),file:f,origFile:f,origUrl:URL.createObjectURL(f),name:f.name,size:f.size,type:f.type,w:0,h:0,thumb:URL.createObjectURL(f),status:'idle',blob:null,cSize:null,cUrl:null,progress:0}));
+  const n=v.map(f=>({id:uid(),file:f,origFile:f,origUrl:URL.createObjectURL(f),name:f.name,size:f.size,origSize:f.size,type:f.type,w:0,h:0,thumb:URL.createObjectURL(f),status:'idle',blob:null,cSize:null,cUrl:null,progress:0}));
   n.forEach(img=>{const t=new Image();t.onload=()=>{img.w=t.naturalWidth;img.h=t.naturalHeight;URL.revokeObjectURL(t.src);notify()};t.src=URL.createObjectURL(img.file)});
   _images=[..._images,...n];notify();
 };
 const rmImg=id=>{const i=_images.find(x=>x.id===id);if(i){URL.revokeObjectURL(i.thumb);if(i.cUrl)URL.revokeObjectURL(i.cUrl)}_images=_images.filter(x=>x.id!==id);_sel.delete(id);notify()};
 const clearAll=()=>{_images.forEach(i=>{URL.revokeObjectURL(i.thumb);if(i.cUrl)URL.revokeObjectURL(i.cUrl)});_images=[];_sel.clear();notify()};
 const upd=(id,u)=>{_images=_images.map(i=>i.id===id?{...i,...u}:i);notify()};
+const curFile=img=>img.blob||img.file;
+const processedFile=(blob,name)=>new File([blob],name,{type:blob.type||'image/png'});
 const toggleSel=id=>{_sel.has(id)?_sel.delete(id):_sel.add(id);notify()};
 const selAll=()=>{_images.forEach(i=>_sel.add(i.id));notify()};
 const deselAll=()=>{_sel.clear();notify()};
@@ -42,6 +44,7 @@ const I={
   eye:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
   droplet:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></svg>,
   sparkle:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/></svg>,
+  tag:()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.59 13.41 11 3H4v7l9.59 9.59a2 2 0 0 0 2.82 0l4.18-4.18a2 2 0 0 0 0-2.82Z"/><circle cx="7.5" cy="7.5" r="1"/></svg>,
 };
 
 // ==================== 进度条组件 ====================
@@ -72,7 +75,7 @@ function EmptyState(){
 
 // ==================== 图片卡片（左侧列表） ====================
 function ImageCard({image,selected,isActive}){
-  const s=image.cSize?((1-image.cSize/image.size)*100).toFixed(0):null;
+  const s=image.cSize?((1-image.cSize/(image.origSize||image.size))*100).toFixed(0):null;
   return <div className={`flex items-center gap-2 p-2 rounded-lg transition-colors group animate-fade-up ${isActive?'bg-blue-50 border border-blue-200':'hover:bg-gray-50 border border-transparent'}`}>
     <div onClick={e=>{e.stopPropagation();toggleSel(image.id)}} className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all ${selected?'bg-blue-500 border-blue-500':'border-gray-300 hover:border-blue-400'}`}>
       {selected&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
@@ -98,7 +101,7 @@ function CompressPanel(){
   const{images,sel}=useStore();
   const[ts,setTs]=useState(500);const[unit,setUnit]=useState('KB');const[fmt2,setFmt2]=useState('keep');const[proc,setProc]=useState(false);
   const targets=sel.size>0?images.filter(i=>sel.has(i.id)):images;
-  const tot=targets.reduce((a,i)=>a+i.size,0);const comp=targets.reduce((a,i)=>a+(i.cSize||0),0);
+  const tot=targets.reduce((a,i)=>a+(i.origSize||i.size),0);const comp=targets.reduce((a,i)=>a+(i.cSize||0),0);
   const dn=targets.filter(i=>i.status==='done').length;const sv=comp>0?((1-comp/tot)*100).toFixed(1):0;
 
   const compressFile=(file,targetBytes,maxW)=>new Promise((resolve,reject)=>{
@@ -129,21 +132,24 @@ function CompressPanel(){
 
   const compress=async()=>{
     setProc(true);const tb=unit==='MB'?ts*1024*1024:ts*1024;
-    const pending=targets.filter(i=>i.status!=='done');
+    const pending=targets;
     const CONC=3;const results=[];
     let idx=0;
     const worker=async()=>{
       while(idx<pending.length){
         const img=pending[idx++];if(!img)break;
-        const origState={blob:img.blob,cSize:img.cSize,cUrl:img.cUrl};
+        const input=curFile(img);const inputSize=input.size||img.size;
+        const origState={name:img.name,file:img.file,blob:img.blob,thumb:img.thumb,size:img.size,cSize:img.cSize,cUrl:img.cUrl,status:img.status,progress:img.progress};
         upd(img.id,{status:'compressing',progress:30});
         try{
-          const sizeRatio=tb/img.size;
+          const sizeRatio=tb/inputSize;
           const maxW=sizeRatio<0.15?1200:sizeRatio<0.3?1920:sizeRatio<0.5?2560:99999;
-          const c=await compressFile(img.file,tb,maxW);
+          const c=await compressFile(input,tb,maxW);
           const url=URL.createObjectURL(c);
-          upd(img.id,{status:'done',blob:c,cSize:c.size,cUrl:url,progress:100});
-          results.push({name:img.name,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:c.size,blob:c,saving:((1-c.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile:new File([c],img.name,{type:c.type}),newBlob:c,newThumb:url,newCSize:c.size,newCUrl:url,origState});
+          const newFile=processedFile(c,img.name);
+          if(img.cUrl)URL.revokeObjectURL(img.cUrl);
+          upd(img.id,{name:newFile.name,file:newFile,blob:c,thumb:url,size:c.size,cSize:c.size,cUrl:url,status:'done',progress:100});
+          results.push({name:img.name,origUrl:origState.thumb||img.origUrl,resultUrl:url,origSize:inputSize,resultSize:c.size,blob:c,saving:((1-c.size/inputSize)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:c,newThumb:url,newCSize:c.size,newCUrl:url,origState});
         }catch(e){upd(img.id,{status:'error'})}
       }
     };
@@ -191,7 +197,7 @@ function WatermarkPanel(){
 
   const processSingle=async(img)=>{
     const fd=new FormData();
-    fd.append('file',img.file);
+    fd.append('file',curFile(img));
     fd.append('sensitivity',sensitivity);
     fd.append('method',method);
     const res=await fetch('/api/watermark-removal',{method:'POST',body:fd});
@@ -202,16 +208,20 @@ function WatermarkPanel(){
 
   const processBatch=async()=>{
     setProc(true);setProgress(0);setProcCount(0);
-    const pending=targets.filter(i=>i.status!=='done');
+    const pending=targets;
     if(pending.length===0){setProc(false);return}
 
     const results=[];
     const doOne=async(img)=>{
+      const input=curFile(img);const inputSize=input.size||img.size;
+      const origState={name:img.name,file:img.file,blob:img.blob,thumb:img.thumb,size:img.size,cSize:img.cSize,cUrl:img.cUrl,status:img.status,progress:img.progress};
       upd(img.id,{status:'processing',progress:50});
       const blob=await processSingle(img);
       const url=URL.createObjectURL(blob);
-      upd(img.id,{status:'done',blob,cSize:blob.size,cUrl:url,progress:100});
-      results.push({name:img.name.replace(/\.[^.]+$/,'')+'_nowm.png',origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:blob.size,blob,imgId:img.id});
+      const newFile=processedFile(blob,img.name.replace(/\.[^.]+$/,'')+'_nowm.png');
+      if(img.cUrl)URL.revokeObjectURL(img.cUrl);
+      upd(img.id,{name:newFile.name,file:newFile,blob,thumb:url,size:blob.size,cSize:blob.size,cUrl:url,status:'done',progress:100});
+      results.push({name:newFile.name,origUrl:origState.thumb||img.origUrl,resultUrl:url,origSize:inputSize,resultSize:blob.size,blob,imgId:img.id,origState});
     };
 
     if(pending.length===1){
@@ -279,7 +289,7 @@ function UpscalePanel(){
 
   const processSingle=async(img)=>{
     const fd=new FormData();
-    fd.append('file',img.file);
+    fd.append('file',curFile(img));
     fd.append('scale',String(scale));
     const res=await fetch('/api/upscale',{method:'POST',body:fd});
     if(!res.ok)throw new Error(`HTTP ${res.status}`);
@@ -289,17 +299,20 @@ function UpscalePanel(){
 
   const processBatch=async()=>{
     setProc(true);setProgress(0);setProcCount(0);
-    const pending=targets.filter(i=>i.status!=='done');
+    const pending=targets;
     if(pending.length===0){setProc(false);return}
 
     const results=[];
     const doOne=async(img)=>{
+      const input=curFile(img);const inputSize=input.size||img.size;
+      const origState={name:img.name,file:img.file,blob:img.blob,thumb:img.thumb,size:img.size,cSize:img.cSize,cUrl:img.cUrl,status:img.status,progress:img.progress};
       upd(img.id,{status:'processing',progress:50});
       const blob=await processSingle(img);
       const url=URL.createObjectURL(blob);
-      upd(img.id,{status:'done',blob,cSize:blob.size,cUrl:url,progress:100});
-      const ext=img.name.lastIndexOf('.')>0?img.name.substring(img.name.lastIndexOf('.')):'.png';
-      results.push({name:img.name.replace(/\.[^.]+$/,'')+'_'+scale+'x.png',origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:blob.size,blob,imgId:img.id});
+      const newFile=processedFile(blob,img.name.replace(/\.[^.]+$/,'')+'_'+scale+'x.png');
+      if(img.cUrl)URL.revokeObjectURL(img.cUrl);
+      upd(img.id,{name:newFile.name,file:newFile,blob,thumb:url,size:blob.size,cSize:blob.size,cUrl:url,status:'done',progress:100});
+      results.push({name:newFile.name,origUrl:origState.thumb||img.origUrl,resultUrl:url,origSize:inputSize,resultSize:blob.size,blob,imgId:img.id,origState});
     };
 
     if(pending.length===1){
@@ -485,7 +498,7 @@ function CropPanel(){
   const applyCropDirect=async()=>{
     if(!img)return;setProcessing(true);
     try{
-      const cropped=await doCrop(img.blob||img.file);
+      const cropped=await doCrop(curFile(img));
       saveAs(cropped, img.name);
       showToast('裁剪完成，已下载 ' + img.name, 'ok');
     }catch(e){console.error('Crop failed:',e);showToast('裁剪失败: ' + e.message, 'err')}
@@ -498,17 +511,18 @@ function CropPanel(){
     if(targets.length===1){
       const t=targets[0];
       try{
-        const cropped=await doCrop(t.blob||t.file);
+        const cropped=await doCrop(curFile(t));
         saveAs(cropped, t.name);
       }catch(e){}
     } else if(targets.length>1){
       const zip=new JSZip();
       for(const t of targets){
         try{
-          const bmp=await createImageBitmap(t.blob||t.file);
+          const input=curFile(t);
+          const bmp=await createImageBitmap(input);
           const cc=calcCropForImage(bmp.width,bmp.height);
           bmp.close();
-          const cropped=await doCrop(t.blob||t.file,cc);
+          const cropped=await doCrop(input,cc);
           zip.file(t.name, cropped);
         }catch(e){}
       }
@@ -521,13 +535,13 @@ function CropPanel(){
   const previewCropSingle=async()=>{
     if(!img)return;setProcessing(true);
     try{
-      const origState={file:img.file,blob:img.blob,thumb:img.thumb,cSize:img.cSize,cUrl:img.cUrl};
-      const cropped=await doCrop(img.blob||img.file);
+      const origState={name:img.name,file:img.file,blob:img.blob,thumb:img.thumb,size:img.size,cSize:img.cSize,cUrl:img.cUrl,status:img.status,progress:img.progress};
+      const cropped=await doCrop(curFile(img));
       if(img.cUrl)URL.revokeObjectURL(img.cUrl);
       const newFile=new File([cropped],img.name,{type:cropped.type});
       const url=URL.createObjectURL(cropped);
-      upd(img.id,{file:newFile,blob:cropped,thumb:url,cSize:cropped.size,cUrl:url,status:'idle'});
-      setCropResults([{name:img.name,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState}]);
+      upd(img.id,{name:newFile.name,file:newFile,blob:cropped,thumb:url,size:cropped.size,cSize:cropped.size,cUrl:url,status:'done',progress:100});
+      setCropResults([{name:img.name,origUrl:origState.thumb||img.origUrl,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState}]);
     }catch(e){console.error('Crop preview failed:',e)}
     setProcessing(false);
   };
@@ -538,16 +552,16 @@ function CropPanel(){
     const results=[];
     for(const img of targets){
       try{
-        const origState={file:img.file,blob:img.blob,thumb:img.thumb,cSize:img.cSize,cUrl:img.cUrl};
-        const bmp=await createImageBitmap(img.blob||img.file);
+        const origState={name:img.name,file:img.file,blob:img.blob,thumb:img.thumb,size:img.size,cSize:img.cSize,cUrl:img.cUrl,status:img.status,progress:img.progress};
+        const bmp=await createImageBitmap(curFile(img));
         const cc=calcCropForImage(bmp.width,bmp.height);
         bmp.close();
-        const cropped=await doCrop(img.blob||img.file,cc);
+        const cropped=await doCrop(curFile(img),cc);
         if(img.cUrl)URL.revokeObjectURL(img.cUrl);
         const newFile=new File([cropped],img.name,{type:cropped.type});
         const url=URL.createObjectURL(cropped);
-        upd(img.id,{file:newFile,blob:cropped,thumb:url,cSize:cropped.size,cUrl:url,status:'idle'});
-        results.push({name:img.name,origUrl:img.thumb,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState});
+        upd(img.id,{name:newFile.name,file:newFile,blob:cropped,thumb:url,size:cropped.size,cSize:cropped.size,cUrl:url,status:'done',progress:100});
+        results.push({name:img.name,origUrl:origState.thumb||img.origUrl,resultUrl:url,origSize:img.size,resultSize:cropped.size,blob:cropped,saving:((1-cropped.size/img.size)*100).toFixed(0)+'%',imgId:img.id,newFile,newBlob:cropped,newThumb:url,newCSize:cropped.size,newCUrl:url,origState});
       }catch(e){}
     }
     if(results.length)setCropResults(results);
@@ -567,7 +581,7 @@ function CropPanel(){
         if(t.origFile&&t.file!==t.origFile){
           if(t.cUrl)URL.revokeObjectURL(t.cUrl);
           const newUrl=URL.createObjectURL(t.origFile);
-          upd(t.id,{file:t.origFile,blob:t.origFile,thumb:newUrl,cSize:null,cUrl:null});
+          upd(t.id,{name:t.origFile.name,file:t.origFile,blob:null,thumb:newUrl,size:t.origSize||t.origFile.size,cSize:null,cUrl:null,status:'idle',progress:0});
         }
       });
       return;
@@ -575,7 +589,7 @@ function CropPanel(){
     if(img.origFile&&img.file!==img.origFile){
       if(img.cUrl)URL.revokeObjectURL(img.cUrl);
       const newUrl=URL.createObjectURL(img.origFile);
-      upd(img.id,{file:img.origFile,blob:img.origFile,thumb:newUrl,cSize:null,cUrl:null});
+      upd(img.id,{name:img.origFile.name,file:img.origFile,blob:null,thumb:newUrl,size:img.origSize||img.origFile.size,cSize:null,cUrl:null,status:'idle',progress:0});
       return;
     }
     const doReset=()=>{
@@ -666,13 +680,122 @@ function CropPanel(){
   </div>;
 }
 
+// ==================== 重命名/转格式面板 ====================
+function RenameConvertPanel(){
+  const{images,sel}=useStore();
+  const[outFmt,setOutFmt]=useState('keep');const[quality,setQuality]=useState(0.92);const[mode,setMode]=useState('keep');
+  const[baseName,setBaseName]=useState('image');const[findStr,setFindStr]=useState('');const[replaceStr,setReplaceStr]=useState('');
+  const[prefix,setPrefix]=useState('');const[suffix,setSuffix]=useState('');const[seq,setSeq]=useState(true);const[seqStart,setSeqStart]=useState(1);const[seqPad,setSeqPad]=useState(3);const[proc,setProc]=useState(false);
+  const targets=sel.size>0?images.filter(i=>sel.has(i.id)):images;
+  const mimeMap={jpg:'image/jpeg',png:'image/png',webp:'image/webp'};
+  const splitName=name=>{const dot=name.lastIndexOf('.');return dot>0?{stem:name.slice(0,dot),ext:name.slice(dot+1).toLowerCase()}:{stem:name,ext:''}};
+  const targetExt=img=>outFmt==='keep'?(splitName(img.name).ext||ext(img.type)):outFmt;
+  const safeStem=v=>(v||'image').trim().replace(/[\\/:*?"<>|]+/g,'-')||'image';
+  const dedupeName=(name,used)=>{
+    if(!used.has(name)){used.add(name);return name}
+    const dot=name.lastIndexOf('.');const stem=dot>0?name.slice(0,dot):name;const ex=dot>0?name.slice(dot):'';
+    let n=2,next=`${stem}_${n}${ex}`;
+    while(used.has(next)){n++;next=`${stem}_${n}${ex}`}
+    used.add(next);return next;
+  };
+  const makeRawName=(img,i)=>{
+    const parts=splitName(img.name);let stem=parts.stem;
+    if(mode==='base')stem=baseName;
+    if(mode==='replace'&&findStr)stem=stem.split(findStr).join(replaceStr);
+    let next=safeStem(`${prefix}${stem}${suffix}`);
+    if(seq)next+=String(Math.max(0,Number(seqStart)||0)+i).padStart(Math.max(1,Number(seqPad)||1),'0');
+    return `${next}.${targetExt(img)}`;
+  };
+  const targetIds=new Set(targets.map(i=>i.id));const usedNames=new Set(images.filter(i=>!targetIds.has(i.id)).map(i=>i.name));
+  const previewNames=new Map();targets.forEach((img,i)=>previewNames.set(img.id,dedupeName(makeRawName(img,i),usedNames)));
+  const convertFile=(file,mime)=>new Promise(async(resolve,reject)=>{
+    let bmp=null;
+    try{
+      bmp=await createImageBitmap(file);
+      const canvas=document.createElement('canvas');canvas.width=bmp.width;canvas.height=bmp.height;
+      const ctx=canvas.getContext('2d');
+      if(mime==='image/jpeg'){ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height)}
+      ctx.drawImage(bmp,0,0);
+      canvas.toBlob(b=>b?resolve(b):reject(new Error('canvas toBlob failed')),mime,mime==='image/png'?undefined:quality);
+    }catch(e){reject(e)}finally{if(bmp)bmp.close()}
+  });
+  const apply=async()=>{
+    if(!targets.length)return;setProc(true);
+    const planned=targets.map(img=>({img,name:previewNames.get(img.id)||makeRawName(img,0),ex:targetExt(img)}));
+    let ok=0;
+    for(const item of planned){
+      const{img,name,ex}=item;const mime=mimeMap[ex]||img.type;const needConvert=outFmt!=='keep'&&img.type!==mime;
+      try{
+        if(!needConvert){upd(img.id,{name});ok++;continue}
+        const input=curFile(img);upd(img.id,{status:'processing',progress:40});
+        const blob=await convertFile(input,mime);const url=URL.createObjectURL(blob);const newFile=processedFile(blob,name);
+        if(img.cUrl)URL.revokeObjectURL(img.cUrl);
+        if(img.thumb&&img.thumb!==img.origUrl&&img.thumb!==img.cUrl)URL.revokeObjectURL(img.thumb);
+        upd(img.id,{name,file:newFile,blob,type:mime,thumb:url,size:blob.size,cSize:blob.size,cUrl:url,status:'done',progress:100});
+        ok++;
+      }catch(e){upd(img.id,{status:'error',progress:0})}
+    }
+    setProc(false);showToast(`已处理 ${ok}/${planned.length} 张`,ok===planned.length?'ok':'info');
+  };
+  const downloadZip=async()=>{
+    if(!targets.length)return;
+    setProc(true);
+    const zip=new JSZip();const used=new Set();
+    try{
+      for(const img of targets){
+        const name=dedupeName(previewNames.get(img.id)||img.name,used);const ex=targetExt(img);const mime=mimeMap[ex]||img.type;
+        const file=outFmt!=='keep'&&img.type!==mime?await convertFile(curFile(img),mime):curFile(img);
+        zip.file(name,file);
+      }
+      saveAs(await zip.generateAsync({type:'blob'}),outFmt==='keep'?'renamed_images.zip':'converted_images.zip');
+    }finally{setProc(false)}
+  };
+  return <div className="h-full flex flex-col p-4 gap-3 animate-fade-up overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm flex-shrink-0">
+      <div className="flex items-center justify-between mb-3"><p className="text-base font-medium text-gray-700">重命名 / 转格式</p>{sel.size>0&&<span className="text-xs text-blue-500">已选 {sel.size} 张</span>}</div>
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div><label className="text-xs text-gray-500 mb-1 block">输出格式</label><select value={outFmt} onChange={e=>setOutFmt(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600 outline-none cursor-pointer hover:bg-gray-100 transition-colors"><option value="keep">保持原格式</option><option value="jpg">JPG</option><option value="png">PNG</option><option value="webp">WEBP</option></select></div>
+        <div><label className="text-xs text-gray-500 mb-1 block">质量 {Math.round(quality*100)}%</label><input type="range" min="0.4" max="1" step="0.01" value={quality} onChange={e=>setQuality(Number(e.target.value))} disabled={outFmt==='png'||outFmt==='keep'} className="w-full h-9 disabled:opacity-30"/></div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        {[['keep','保留原名'],['base','统一基名'],['replace','查找替换']].map(([id,label])=><button key={id} onClick={()=>setMode(id)} className={`h-9 rounded-lg text-sm font-medium transition-all ${mode===id?'bg-blue-500 text-white':'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>{label}</button>)}
+      </div>
+      {mode==='base'&&<div className="mb-3"><label className="text-xs text-gray-500 mb-1 block">统一基名</label><input value={baseName} onChange={e=>setBaseName(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all" placeholder="image"/></div>}
+      {mode==='replace'&&<div className="grid grid-cols-2 gap-3 mb-3">
+        <div><label className="text-xs text-gray-500 mb-1 block">查找</label><input value={findStr} onChange={e=>setFindStr(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all" placeholder="原文字"/></div>
+        <div><label className="text-xs text-gray-500 mb-1 block">替换为</label><input value={replaceStr} onChange={e=>setReplaceStr(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all" placeholder="新文字"/></div>
+      </div>}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div><label className="text-xs text-gray-500 mb-1 block">前缀</label><input value={prefix} onChange={e=>setPrefix(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all" placeholder="可选"/></div>
+        <div><label className="text-xs text-gray-500 mb-1 block">后缀</label><input value={suffix} onChange={e=>setSuffix(e.target.value)} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all" placeholder="可选"/></div>
+      </div>
+      <div className="flex items-end gap-3 flex-wrap">
+        <button onClick={()=>setSeq(v=>!v)} className={`h-9 px-3 rounded-lg text-sm font-medium transition-all ${seq?'bg-blue-50 text-blue-500':'bg-gray-50 text-gray-400'}`}>{seq?'追加序号':'不加序号'}</button>
+        <div className="w-24"><label className="text-xs text-gray-500 mb-1 block">起始</label><input type="number" value={seqStart} onChange={e=>setSeqStart(Number(e.target.value))} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all"/></div>
+        <div className="w-24"><label className="text-xs text-gray-500 mb-1 block">位数</label><input type="number" min="1" value={seqPad} onChange={e=>setSeqPad(Number(e.target.value))} className="w-full h-9 px-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-800 outline-none focus:border-blue-400 transition-all"/></div>
+      </div>
+    </div>
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-1">
+      <p className="text-xs text-gray-400 mb-1">实时预览 ({targets.length})</p>
+      {targets.map((img,i)=>{const next=previewNames.get(img.id)||img.name;const ex=targetExt(img);const converting=outFmt!=='keep'&&img.type!==(mimeMap[ex]||img.type);return <div key={img.id} className="flex items-center gap-2.5 p-2 rounded-lg bg-white border border-gray-100 hover:border-gray-200 transition-all animate-fade-up" style={{animationDelay:`${i*25}ms`}}>
+        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" loading="lazy" className="w-full h-full object-cover"/></div>
+        <div className="flex-1 min-w-0"><p className="text-sm text-gray-700 truncate">{img.name}</p><div className="flex items-center gap-1.5 mt-0.5 min-w-0"><span className="text-xs text-gray-300">→</span><span className="text-xs text-blue-500 truncate">{next}</span></div></div>
+        <div className="text-right flex-shrink-0"><p className="text-xs font-medium text-gray-600 uppercase">{ex}</p><p className="text-[11px] text-gray-400">{fmt(img.size)}</p></div>
+        {img.status==='processing'&&<Progress value={img.progress||0} className="w-16"/>}
+        {img.status==='error'?<span className="text-xs text-red-400 font-medium">失败</span>:converting&&<span className="text-xs text-blue-500 font-medium">转码</span>}
+      </div>})}
+    </div>
+    <div className="flex items-center gap-2 pt-1 flex-shrink-0 flex-wrap"><Btn variant="primary" className="flex-1 min-w-0" onClick={apply} disabled={!targets.length||proc} loading={proc}><I.tag/>{sel.size>0?`处理选中 (${sel.size})`:'应用处理'}</Btn><Btn variant="ghost" onClick={downloadZip} disabled={!targets.length||proc}><Download/>打包下载</Btn><Btn variant="ghost" onClick={clearAll} disabled={!images.length}>清空</Btn></div>
+  </div>;
+}
+
 // ==================== 下载面板 ====================
 function DownloadPanel(){
   const{images}=useStore();
-  const proc=images.filter(i=>i.blob);const tot=images.reduce((a,i)=>a+i.size,0);
+  const proc=images.filter(i=>i.blob);const tot=images.reduce((a,i)=>a+(i.origSize||i.size),0);
   const comp=proc.reduce((a,i)=>a+(i.cSize||i.size),0);const sv=comp>0?((1-comp/tot)*100).toFixed(1):0;
-  const dl=img=>{const b=img.blob||img.file;saveAs(b,img.name)};
-  const dlAll=async()=>{if(!proc.length)return;const zip=new JSZip();proc.forEach(img=>{const b=img.blob||img.file;zip.file(img.name,b)});saveAs(await zip.generateAsync({type:'blob'}),'images.zip')};
+  const dl=img=>{const b=curFile(img);saveAs(b,img.name)};
+  const dlAll=async()=>{if(!proc.length)return;const zip=new JSZip();proc.forEach(img=>{const b=curFile(img);zip.file(img.name,b)});saveAs(await zip.generateAsync({type:'blob'}),'images.zip')};
   return <div className="h-full flex flex-col p-4 gap-3 overflow-y-auto animate-fade-up">
     <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
       <p className="text-base font-medium text-gray-700 mb-2.5">下载概览</p>
@@ -680,9 +803,9 @@ function DownloadPanel(){
     </div>
     <div className="flex-1">
       <div className="flex items-center px-3 py-2 text-xs text-gray-400 font-medium border-b border-gray-100"><span className="flex-1">文件名</span><span className="w-16 text-right">原始</span><span className="w-16 text-right">处理后</span><span className="w-12 text-right">节省</span><span className="w-12 text-right">操作</span></div>
-      <div className="space-y-0.5">{images.map((img,i)=>{const has=!!img.blob;const s=has&&img.cSize?((1-img.cSize/img.size)*100).toFixed(0):null;return<div key={img.id} className="flex items-center px-3 py-2.5 rounded-lg hover:bg-gray-50 transition-colors animate-fade-up" style={{animationDelay:`${i*20}ms`}}>
+      <div className="space-y-0.5">{images.map((img,i)=>{const has=!!img.blob;const baseSize=img.origSize||img.size;const s=has&&img.cSize?((1-img.cSize/baseSize)*100).toFixed(0):null;return<div key={img.id} className="flex items-center px-3 py-2.5 rounded-lg hover:bg-gray-50 transition-colors animate-fade-up" style={{animationDelay:`${i*20}ms`}}>
         <div className="flex-1 flex items-center gap-2 min-w-0"><div className="w-8 h-8 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0"><img src={img.thumb} alt="" loading="lazy" className="w-full h-full object-cover"/></div><span className="text-sm text-gray-700 truncate">{img.name}</span></div>
-        <span className="w-16 text-right text-xs text-gray-400">{fmt(img.size)}</span>
+        <span className="w-16 text-right text-xs text-gray-400">{fmt(baseSize)}</span>
         <span className="w-16 text-right text-xs text-gray-500">{has?fmt(img.cSize||img.size):'-'}</span>
         <span className="w-12 text-right text-xs text-green-500 font-medium">{s?s+'%':'-'}</span>
         <div className="w-16 text-right flex items-center justify-end gap-1">
@@ -744,7 +867,7 @@ function PreviewModal(){
   const close=()=>{
     items.forEach((item,i)=>{
       if(removed.has(i)&&item.imgId&&item.origState){
-        upd(item.imgId,{...item.origState,status:'idle'});
+        upd(item.imgId,item.origState);
       }
     });
     setPreview(null);
@@ -867,12 +990,13 @@ function ImagePreview(){
   if(cropResults&&cropResults.length)return <CropResultsPanel/>;
   const current=previewImg?images.find(i=>i.id===previewImg.id):null;
   if(!current)return <div className="flex-1 flex items-center justify-center bg-[#f5f7fa]"><p className="text-base text-gray-400">点击左侧图片进行预览</p></div>;
-  const s=current.cSize?((1-current.cSize/current.size)*100).toFixed(0):null;
+  const baseSize=current.origSize||current.size;
+  const s=current.cSize?((1-current.cSize/baseSize)*100).toFixed(0):null;
   return <div className="flex-1 flex flex-col bg-[#f5f7fa] overflow-hidden">
     <div className="flex items-center justify-between px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-base font-medium text-gray-700 truncate">{current.name}</span>
-        <span className="text-xs text-gray-400 flex-shrink-0">{fmt(current.size)}</span>
+        <span className="text-xs text-gray-400 flex-shrink-0">{fmt(baseSize)}</span>
         {current.cSize&&<span className="text-xs text-green-500 flex-shrink-0">→ {fmt(current.cSize)} ({s}%)</span>}
       </div>
       <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -890,7 +1014,7 @@ function ImagePreview(){
 function App(){
   const{images,tab,sel,preview,previewImg}=useStore();
   const has=images.length>0;
-  const tabs=[{id:'compress',l:'压缩',icon:I.zap},{id:'watermark',l:'去水印',icon:I.droplet},{id:'upscale',l:'高清化',icon:I.sparkle},{id:'crop',l:'裁剪',icon:I.scissors},{id:'download',l:'下载',icon:Download}];
+  const tabs=[{id:'compress',l:'压缩',icon:I.zap},{id:'watermark',l:'去水印',icon:I.droplet},{id:'upscale',l:'高清化',icon:I.sparkle},{id:'crop',l:'裁剪',icon:I.scissors},{id:'rename',l:'重命名/转格式',icon:I.tag},{id:'download',l:'下载',icon:Download}];
   const tot=images.reduce((a,i)=>a+i.size,0);const comp=images.reduce((a,i)=>a+(i.cSize||0),0);
   const selCount=sel.size;
 
@@ -939,7 +1063,7 @@ function App(){
           <div className="flex items-center gap-1 px-4 py-2.5 bg-white border-b border-gray-100 flex-shrink-0">
             {tabs.map(t=><button key={t.id} onClick={()=>{_tab=t.id;notify()}} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${tab===t.id?'bg-blue-500 text-white':'text-gray-500 hover:bg-gray-100'}`}><t.icon/>{t.l}</button>)}
           </div>
-          <div className="flex-1 overflow-hidden">{!has?<EmptyState/>:<div key={tab} className="h-full">{tab==='compress'&&<CompressPanel/>}{tab==='watermark'&&<WatermarkPanel/>}{tab==='upscale'&&<UpscalePanel/>}{tab==='crop'&&<CropPanel/>}{tab==='download'&&<DownloadPanel/>}</div>}</div>
+          <div className="flex-1 overflow-hidden">{!has?<EmptyState/>:<div key={tab} className="h-full">{tab==='compress'&&<CompressPanel/>}{tab==='watermark'&&<WatermarkPanel/>}{tab==='upscale'&&<UpscalePanel/>}{tab==='crop'&&<CropPanel/>}{tab==='rename'&&<RenameConvertPanel/>}{tab==='download'&&<DownloadPanel/>}</div>}</div>
         </div>
         {has&&!isMobile&&<>
           <Divider onDrag={handleRightDrag}/>

@@ -39,6 +39,15 @@ export default defineConfig({
     }
   ],
   base: './',
+  server: {
+    proxy: {
+      '/api': 'http://127.0.0.1:5001',
+      '/src/libs': {
+        target: 'http://127.0.0.1:5001',
+        rewrite: path => path.replace(/^\/src\/libs/, '/tools/libs'),
+      },
+    },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

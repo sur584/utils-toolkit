@@ -203,6 +203,7 @@ const proxyStatus = $('#proxyStatus');
 
 let currentVideoData = null;
 let selectedImages = new Set();
+const activeDownloads = new Set();
 
 // ─── 代理自动检测 ────────────────────────────────
 
@@ -607,6 +608,11 @@ function setDownloadLoading(loading) {
 }
 
 async function handleDownload() {
+    if (downloadBtn.disabled) {
+        showToast('正在下载，请稍候', 'info');
+        return;
+    }
+
     const isImage = currentVideoData?.note_type === 'image' || (currentVideoData?.image_list?.length > 0);
 
     if (isImage && currentVideoData.image_list) {
@@ -988,8 +994,13 @@ async function handleBatchParse() {
             body: JSON.stringify({ urls }),
         });
         const { results } = await readJsonResponse(resp, '批量解析接口');
+        const finalResults = await Promise.all(results.map(async (r, index) => {
+            if (r.success || _detectPlatform(urls[index]) !== 'tiktok') return r;
+            const relayResult = await _tryCorsProxyRelay(urls[index]);
+            return relayResult || r;
+        }));
         let ok = 0;
-        results.forEach((r) => { if (r.success) ok++; renderBatchItem(r); });
+        finalResults.forEach((r) => { if (r.success) ok++; renderBatchItem(r); });
         showStatus(batchStatus, `完成: ${ok}/${urls.length} 成功`, ok === urls.length ? 'success' : 'warning');
     } catch (err) {
         showStatus(batchStatus, `❌ 失败: ${err.message}`, 'error');
@@ -1074,7 +1085,7 @@ async function handleClearHistory() {
 // ─── 事件委托 ────────────────────────────────────
 document.addEventListener('click', (e) => {
     const btn = e.target.closest('.js-download');
-    if (btn) { doDownload(btn.dataset.url, btn.dataset.title, btn.dataset.platform); return; }
+    if (btn) { doDownload(btn.dataset.url, btn.dataset.title, btn.dataset.platform, btn); return; }
     const copyBtn = e.target.closest('.js-copy');
     if (copyBtn) {
         navigator.clipboard.writeText(copyBtn.dataset.url).then(
@@ -1114,7 +1125,21 @@ document.addEventListener('click', (e) => {
     }
 });
 
-async function doDownload(videoUrl, title, platform) {
+async function doDownload(videoUrl, title, platform, button) {
+    const downloadKey = `${platform || ''}:${videoUrl || ''}`;
+    if (activeDownloads.has(downloadKey)) {
+        showToast('正在下载，请稍候', 'info');
+        return;
+    }
+
+    const originalText = button?.textContent || '';
+    activeDownloads.add(downloadKey);
+    if (button) {
+        button.disabled = true;
+        button.textContent = '下载中...';
+    }
+    showToast('正在下载...', 'info');
+
     try {
         // 需要中继的平台优先客户端直连
         if (NEEDS_RELAY.includes(platform)) {
@@ -1147,7 +1172,15 @@ async function doDownload(videoUrl, title, platform) {
         a.click();
         URL.revokeObjectURL(a.href);
         showToast('下载完成', 'success');
-    } catch (err) { showToast(`下载失败: ${err.message}`, 'error'); }
+    } catch (err) {
+        showToast(`下载失败: ${err.message}`, 'error');
+    } finally {
+        activeDownloads.delete(downloadKey);
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
 }
 
 // ─── 工具函数 ────────────────────────────────────

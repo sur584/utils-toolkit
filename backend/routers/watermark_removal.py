@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _service = None
+WATERMARK_REMOVAL_CACHE_VERSION = "v10"
 
 
 def _get_service():
@@ -45,7 +46,7 @@ async def watermark_removal(
         raise HTTPException(status_code=400, detail="文件为空")
 
     # 缓存检查
-    cache_key = DiskCache.make_key(input_data, f"wmrm_{sensitivity}_{method}")
+    cache_key = DiskCache.make_key(input_data, f"wmrm_{sensitivity}_{method}", WATERMARK_REMOVAL_CACHE_VERSION)
     cached = disk_cache.get(cache_key)
     if cached:
         base_name = file.filename.rsplit(".", 1)[0] if file.filename else "image"
@@ -142,7 +143,7 @@ async def watermark_removal_batch(
             out_path.mkdir(exist_ok=True)
             (out_path / out_name).write_bytes(output_data)
 
-            cache_key = DiskCache.make_key(item["data"], f"wmrm_{sensitivity}_{method}")
+            cache_key = DiskCache.make_key(item["data"], f"wmrm_{sensitivity}_{method}", WATERMARK_REMOVAL_CACHE_VERSION)
             disk_cache.put(cache_key, output_data, metadata)
 
             return idx, {

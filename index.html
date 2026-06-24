@@ -30,7 +30,7 @@ a { text-decoration: none; color: inherit; }
 /* ─── Sidebar ─── */
 .sidebar {
     width: 240px; flex-shrink: 0;
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
     display: flex; flex-direction: column;
     position: sticky; top: 0; height: 100vh;
     overflow-y: auto; z-index: 50;
@@ -95,7 +95,7 @@ a { text-decoration: none; color: inherit; }
 .nav-section-header .nav-icon { font-size: 19px; width: 22px; text-align: center; }
 [data-theme="light"] .nav-section-header:hover {
     background: rgba(255, 255, 255, 0.6);
-    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
 [data-theme="dark"] .nav-section-header:hover {
     background: rgba(255, 255, 255, 0.05);
@@ -126,7 +126,7 @@ a { text-decoration: none; color: inherit; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .main-header {
     position: sticky; top: 0; z-index: 40;
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
     padding: 18px 28px;
     display: flex; align-items: center; gap: 16px;
 }
@@ -148,7 +148,7 @@ a { text-decoration: none; color: inherit; }
 .filter-btn {
     padding: 7px 18px; border-radius: 8px;
     font-size: 15px; font-weight: 500;
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
     color: var(--text-secondary); cursor: pointer;
     transition: all 0.2s; white-space: nowrap;
 }
@@ -162,7 +162,7 @@ a { text-decoration: none; color: inherit; }
 .tools-head h3 { font-size: 19px; font-weight: 700; }
 .tools-head .count {
     font-size: 15px; color: var(--text-muted);
-    backdrop-filter: blur(8px); padding: 5px 14px; border-radius: 8px;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); padding: 5px 14px; border-radius: 8px;
 }
 
 /* ─── Tool Grid ─── */
@@ -209,7 +209,7 @@ a { text-decoration: none; color: inherit; }
 /* ─── Right Panel ─── */
 .right-panel {
     width: 280px; flex-shrink: 0;
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
     padding: 24px 18px; overflow-y: auto;
     position: sticky; top: 0; height: 100vh;
 }
@@ -219,58 +219,27 @@ a { text-decoration: none; color: inherit; }
     margin-bottom: 14px; display: flex; align-items: center; gap: 7px;
 }
 .panel-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-/* ─── Timeline ─── */
-.timeline { display: flex; flex-direction: column; gap: 0; }
-.tl-item {
-    display: flex; gap: 12px;
-    padding: 10px 0 10px 2px;
-    position: relative;
+/* ─── Recent Updates ─── */
+.update-list { display: flex; flex-direction: column; gap: 10px; }
+.update-item { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.update-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.update-main { display: flex; align-items: baseline; gap: 8px; }
+.update-date { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.update-title { font-size: 14px; font-weight: 600; color: var(--text-primary); line-height: 1.35; }
+.update-summary { margin-top: 3px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+.update-more {
+    margin-top: 12px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--accent);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
 }
-.tl-item:not(:last-child)::before {
-    content: '';
-    position: absolute;
-    left: 5px; top: 28px; bottom: -2px;
-    width: 1px;
-}
-[data-theme="light"] .tl-item:not(:last-child)::before { background: rgba(0,0,0,0.08); }
-[data-theme="dark"] .tl-item:not(:last-child)::before { background: rgba(255,255,255,0.06); }
-.tl-marker {
-    width: 11px; height: 11px;
-    border-radius: 50%;
-    background: var(--accent);
-    flex-shrink: 0;
-    margin-top: 5px;
-    position: relative;
-    z-index: 1;
-}
-.tl-item:first-child .tl-marker {
-    width: 11px; height: 11px;
-    box-shadow: 0 0 0 3px var(--accent-glow);
-}
-.tl-item:not(:first-child) .tl-marker {
-    width: 8px; height: 8px;
-    background: var(--text-muted);
-    margin-top: 6px;
-    margin-left: 1.5px;
-}
-.tl-content { flex: 1; min-width: 0; }
-.tl-head {
-    display: flex; align-items: center; gap: 8px;
-    margin-bottom: 3px;
-}
-.tl-date { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.tl-tag {
-    font-size: 10px; padding: 1px 7px;
-    border-radius: 4px; font-weight: 600;
-    letter-spacing: 0.3px;
-}
-.tl-tag-blue { background: rgba(59,130,246,0.12); color: #60a5fa; }
-.tl-tag-green { background: rgba(16,185,129,0.12); color: #34d399; }
-.tl-tag-purple { background: rgba(139,92,246,0.12); color: #a78bfa; }
-[data-theme="dark"] .tl-tag-blue { background: rgba(59,130,246,0.18); color: #93bbfc; }
-[data-theme="dark"] .tl-tag-green { background: rgba(16,185,129,0.18); color: #6ee7b7; }
-[data-theme="dark"] .tl-tag-purple { background: rgba(139,92,246,0.18); color: #c4b5fd; }
-.tl-text { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+.update-more:hover { background: var(--accent-glow); }
 .quick-list { display: flex; flex-direction: column; gap: 6px; }
 .quick-list a {
     display: flex; align-items: center; gap: 8px;
@@ -282,7 +251,7 @@ a { text-decoration: none; color: inherit; }
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .stat-item {
     text-align: center; padding: 16px 10px;
-    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
     border-radius: 12px;
 }
 .stat-num { font-size: 24px; font-weight: 700; color: var(--accent); line-height: 1; }
@@ -299,12 +268,12 @@ a { text-decoration: none; color: inherit; }
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 49; }
 .mobile-header {
     display: none; position: sticky; top: 0; z-index: 40;
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
     padding: 14px 16px; align-items: center; gap: 12px;
 }
 .mobile-menu-btn {
     width: 40px; height: 40px; border-radius: 10px;
-    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
     color: var(--text-primary); font-size: 20px;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
 }
@@ -323,7 +292,7 @@ a { text-decoration: none; color: inherit; }
 [data-theme="light"] .sidebar-logo { border-bottom: 1px solid rgba(0,0,0,0.06); }
 [data-theme="light"] .nav-item:hover {
     background: rgba(255, 255, 255, 0.6);
-    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
 [data-theme="light"] .nav-item.active {
     background: rgba(99, 102, 241, 0.12);
@@ -364,7 +333,7 @@ a { text-decoration: none; color: inherit; }
 [data-theme="light"] .changelog-item { border-bottom: 1px solid rgba(0,0,0,0.06); }
 [data-theme="light"] .quick-list a:hover {
     background: rgba(255, 255, 255, 0.6);
-    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
 [data-theme="light"] .stat-item {
     background: rgba(255, 255, 255, 0.55);
@@ -760,63 +729,83 @@ a { text-decoration: none; color: inherit; }
     <aside class="right-panel">
         <div class="panel-section">
             <div class="panel-title"><span class="dot"></span> 最近更新</div>
-            <div class="timeline">
-                <div class="tl-item">
-                    <div class="tl-marker"></div>
-                    <div class="tl-content">
-                        <div class="tl-head">
-                            <span class="tl-date">06-16</span>
-                            <span class="tl-tag tl-tag-green">新增</span>
-                        </div>
-                        <div class="tl-text">图片批量处理工具新增智能去水印和图片高清化功能</div>
-                    </div>
-                </div>
-                <div class="tl-item">
-                    <div class="tl-marker"></div>
-                    <div class="tl-content">
-                        <div class="tl-head">
-                            <span class="tl-date">06-15</span>
-                            <span class="tl-tag tl-tag-green">新增</span>
-                        </div>
-                        <div class="tl-text">视频文案提取工具上线，支持字幕提取与 AI 语音识别</div>
-                    </div>
-                </div>
-                <div class="tl-item">
-                    <div class="tl-marker"></div>
-                    <div class="tl-content">
-                        <div class="tl-head">
-                            <span class="tl-date">06-05</span>
-                            <span class="tl-tag tl-tag-purple">优化</span>
-                        </div>
-                        <div class="tl-text">项目重构，统一前端样式与主题系统</div>
-                    </div>
-                </div>
-                <div class="tl-item">
-                    <div class="tl-marker"></div>
-                    <div class="tl-content">
-                        <div class="tl-head">
-                            <span class="tl-date">05-30</span>
-                            <span class="tl-tag tl-tag-blue">V2.0</span>
-                        </div>
-                        <div class="tl-text">AI 智能抠图、溶图合成、智能去文字上线</div>
-                    </div>
-                </div>
-                <div class="tl-item">
-                    <div class="tl-marker"></div>
-                    <div class="tl-content">
-                        <div class="tl-head">
-                            <span class="tl-date">05-28</span>
-                            <span class="tl-tag tl-tag-green">新增</span>
-                        </div>
-                        <div class="tl-text">视频链接解析下载</div>
-                    </div>
-                </div>
-            </div>
+            <div class="update-list" id="recentUpdates"></div>
         </div>
     </aside>
 </div>
 
 <script>
+const recentUpdatesJson = [
+     {
+        date: '06.24',
+        title: '新增批量图片重命名',
+        summary: '新增批量图片重命名与转格式的功能',
+        detail: ''
+    },
+    {
+        date: '06.23',
+        title: '优化视频解析功能',
+        summary: '修复批量视频解析、下载等问题',
+        detail: '新增下载中提示；后端下载文件名改为安全短名，避免 Windows .mp4.part 写入失败；批量 TikTok 解析增加前端回退。'
+    },
+    {
+        date: '06.22',
+        title: '图片处理链路修复',
+        summary: '压缩后可继续去水印、高清化、裁剪，预览与下载更稳定。',
+        detail: '修复结果预览原图坏图、下载结果异常等问题。'
+    },
+     {
+        date: '06.18',
+        title: '新增功能智能抠图',
+        summary: '上传一张产品图片，可智能进行抠图，抠出白底，支持手动涂抹',
+        detail: ''
+    },
+    {
+        date: '06.16',
+        title: '图片批量处理扩展',
+        summary: '新增智能去水印和图片高清化能力。',
+        detail: '批量图片可以统一处理，适合电商图、社媒素材的快速整理。'
+    },
+    {
+        date: '06.05',
+        title: '工具箱视觉统一',
+        summary: '统一前端样式与主题系统。',
+        detail: '增强浅色/深色模式一致性，整理工具入口和页面布局。'
+    },
+    {
+        date: '05.30',
+        title: 'AI 图片工具上线',
+        summary: '上线 AI 智能抠图、溶图合成、智能去文字。',
+        detail: '补齐图片创作和修图的常用 AI 工具链。'
+    }
+];
+
+let showAllUpdates = false;
+
+function renderRecentUpdates() {
+    const container = document.getElementById('recentUpdates');
+    if (!container) return;
+    const visibleUpdates = showAllUpdates ? recentUpdatesJson : recentUpdatesJson.slice(0, 5);
+    container.innerHTML = visibleUpdates.map((item) => `
+        <article class="update-item">
+            <div class="update-main">
+                <span class="update-date">${item.date}</span>
+                <span class="update-title">${item.title}</span>
+            </div>
+            <div class="update-summary">${item.summary}</div>
+        </article>
+    `).join('');
+    if (recentUpdatesJson.length > 5) {
+        container.insertAdjacentHTML('beforeend', `<button class="update-more" type="button">${showAllUpdates ? '收起' : '更多历史更新'}</button>`);
+        container.querySelector('.update-more').addEventListener('click', () => {
+            showAllUpdates = !showAllUpdates;
+            renderRecentUpdates();
+        });
+    }
+}
+
+renderRecentUpdates();
+
 // Theme
 const themeBtn = document.getElementById('themeBtn');
 function setTheme(t) {

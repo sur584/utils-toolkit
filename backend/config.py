@@ -5,6 +5,7 @@
 import os
 import platform
 import logging
+import socket
 from pathlib import Path
 
 # 加载 .env 文件
@@ -17,7 +18,31 @@ if _env_file.exists():
             os.environ.setdefault(_k.strip(), _v.strip())
 
 # ─── 全局 HTTP 代理自动检测 ──────────────────────────
-# 优先级: .env 中的 HTTP_PROXY > 环境变量 > Windows 系统代理设置 > 直连
+# 优先级: .env 中的 HTTP_PROXY > 环境变量 > Windows 系统代理设置 > 常见本机代理端口 > 直连
+def _normalize_proxy_server(server: str) -> str:
+    server = server.strip()
+    if not server:
+        return ""
+    if ";" in server:
+        parts = {}
+        for item in server.split(";"):
+            if "=" in item:
+                key, value = item.split("=", 1)
+                parts[key.strip().lower()] = value.strip()
+        server = parts.get("https") or parts.get("http") or parts.get("socks") or ""
+    if server and not server.startswith(("http://", "https://", "socks5://", "socks4://")):
+        server = f"http://{server}"
+    return server
+
+
+def _local_port_open(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
 def _detect_proxy() -> str:
     # 1. 环境变量（.env 已写入 os.environ）
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
@@ -36,11 +61,15 @@ def _detect_proxy() -> str:
                 enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
                 server = winreg.QueryValueEx(key, "ProxyServer")[0]
                 if enabled and server:
-                    if not server.startswith("http://") and not server.startswith("https://"):
-                        server = f"http://{server}"
-                    return server
+                    proxy = _normalize_proxy_server(server)
+                    if proxy:
+                        return proxy
         except Exception:
             pass
+
+    for port in (7897, 7890, 7891, 7892, 7893, 7899, 10809, 10808, 1080, 1081):
+        if _local_port_open(port):
+            return f"http://127.0.0.1:{port}"
 
     return ""
 

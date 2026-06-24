@@ -178,14 +178,9 @@ async def parse(url: str) -> Dict[str, Any]:
     user_match = re.search(r"/(@[\w.-]+)/", url)
     username = user_match.group(1) if user_match else "@"
 
-    # 无可用代理时，跳过后端解析，让前端通过同源 oEmbed 兜底获取基础信息。
     if not get_active_proxy():
-        logger.info("TikTok: 无可用代理，跳过后端解析，由前端同源 oEmbed 处理")
-        result = _empty_result("TikTok 需要可访问 TikTok 的网络或代理")
-        result["retry"] = False
-        return result
+        logger.info("TikTok: 未配置显式代理，尝试使用当前网络直接解析")
 
-    # 有客户端代理时，通过代理访问 TikTok（代理在客户端，IP 不受 geo 限制）
     item = await _parse_via_ytdlp(video_id, username)
 
     if not item:
