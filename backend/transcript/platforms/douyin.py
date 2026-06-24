@@ -45,9 +45,10 @@ async def fetch_video_info(url: str) -> Dict[str, Any]:
     if not video_id:
         raise ValueError("无法提取视频 ID")
 
-    # 从 iesdouyin.com 获取页面
     page_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
-    html = await _fetch(page_url, headers=_headers(mobile=True))
+    html = await _fetch(page_url, headers=_headers(mobile=True), use_proxy=False)
+    if not html:
+        html = await _fetch(page_url, headers=_headers(mobile=True))
     if not html:
         raise RuntimeError("获取抖音页面失败")
 

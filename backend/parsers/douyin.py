@@ -35,7 +35,9 @@ async def parse(url: str) -> Dict[str, Any]:
         return _empty_result("无法提取视频 ID")
 
     page_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
-    html = await _fetch(page_url, headers=_headers(mobile=True))
+    html = await _fetch(page_url, headers=_headers(mobile=True), use_proxy=False)
+    if not html:
+        html = await _fetch(page_url, headers=_headers(mobile=True))
     if not html:
         return _empty_result("获取页面失败")
 

@@ -40,9 +40,18 @@ async def _follow_redirects(url: str, timeout: float = 10.0) -> str:
         return str(r.url)
 
 
-async def _fetch(url: str, headers: Dict = None, timeout: float = 15.0, follow: bool = True) -> Optional[str]:
+async def _fetch(
+    url: str,
+    headers: Dict = None,
+    timeout: float = 15.0,
+    follow: bool = True,
+    use_proxy: bool = True,
+) -> Optional[str]:
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=follow) as c:
+        client_kwargs = dict(timeout=timeout, follow_redirects=follow)
+        if not use_proxy:
+            client_kwargs["trust_env"] = False
+        async with httpx.AsyncClient(**client_kwargs) as c:
             r = await c.get(url, headers=headers or _headers())
             if r.status_code == 200:
                 return r.text
