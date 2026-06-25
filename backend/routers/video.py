@@ -463,20 +463,31 @@ async def auto_detect_proxy_config(request: Request):
     client_ip = request.client.host if request.client else ""
     try:
         ip_obj = ipaddress.ip_address(client_ip)
-    except ValueError:
+    except Exception as e:
+        logger.warning(f"[代理] IP 解析失败: {client_ip}, 错误: {e}")
         return {"success": False, "message": "无法识别客户端 IP", "client_ip": client_ip}
 
-    if not (ip_obj.is_private or ip_obj.is_loopback):
+    # 处理 IPv6 映射的 IPv4 地址 (::ffff:a.b.c.d)
+    check_ip = ip_obj
+    if hasattr(ip_obj, 'ipv4_mapped') and ip_obj.ipv4_mapped:
+        check_ip = ip_obj.ipv4_mapped
+        logger.debug(f"[代理] 检测到 IPv6 映射地址，转换为 IPv4: {client_ip} -> {check_ip}")
+
+    if not (check_ip.is_private or check_ip.is_loopback):
         return {"success": False, "message": "仅支持局域网或本机客户端自动检测", "client_ip": client_ip}
 
     ports = [7890, 7897, 7891, 7892, 7893, 7899, 10809, 10808, 1080, 1081, 8080, 3128, 8888, 1088]
-    for port in ports:
-        proxy = f"http://{client_ip}:{port}"
-        if await _test_client_proxy(proxy):
-            set_client_proxy(proxy)
-            active = get_active_proxy()
-            logger.info(f"[代理] 自动检测成功: {proxy}")
-            return {"success": True, "proxy": proxy, "active": active, "client_ip": client_ip}
+    try:
+        for port in ports:
+            proxy = f"http://{check_ip}:{port}"
+            if await _test_client_proxy(proxy):
+                set_client_proxy(proxy)
+                active = get_active_proxy()
+                logger.info(f"[代理] 自动检测成功: {proxy}")
+                return {"success": True, "proxy": proxy, "active": active, "client_ip": client_ip}
+    except Exception as e:
+        logger.error(f"[代理] 端口扫描过程出错: {e}", exc_info=True)
+        return {"success": False, "message": f"代理检测过程出错: {str(e)}", "client_ip": client_ip}
 
     return {"success": False, "message": "未检测到可用客户端代理，请确认代理软件已开启局域网连接", "client_ip": client_ip}
 

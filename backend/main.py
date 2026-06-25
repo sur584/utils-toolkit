@@ -11,9 +11,10 @@ from contextlib import asynccontextmanager
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import logging
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.exception_handlers import http_exception_handler
 
 from deps import model_manager, disk_cache
 from routers import video, bg_remove, text_remove, watermark, watermark_removal, upscale, history, static
@@ -58,7 +59,20 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # ─── 静态资源缓存 + CORS 中间件 ────────────────────────
 @app.middleware("http")
 async def add_cache_headers(request: Request, call_next):
-    response = await call_next(request)
+    # 始终确保返回响应，避免 ASGI "callable returned without starting response" 错误
+    # 即使发生异常，也让 FastAPI 生成错误响应后再添加 CORS 头
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        # 让 FastAPI 默认异常处理器处理异常并生成响应
+        # 这里捕获异常是为了走到下面的代码，给错误响应也添加 CORS 头
+        if isinstance(e, HTTPException):
+            response = await http_exception_handler(request, e)
+        else:
+            # 对于非 HTTPException，转换为 500 错误响应
+            logger.error(f"Uncaught exception processing request: {e}", exc_info=True)
+            response = await http_exception_handler(request, HTTPException(status_code=500, detail=str(e)))
+
     path = request.url.path
     # 确保所有响应都有 CORS 头（StaticFiles 子应用可能绕过 CORSMiddleware）
     response.headers['Access-Control-Allow-Origin'] = '*'
