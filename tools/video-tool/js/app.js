@@ -563,7 +563,7 @@ function renderVideoResult(data) {
         previewBtn.textContent = '▶ 查看封面';
         copyLinkBtn.textContent = '🔗 复制封面链接';
     } else {
-        downloadBtn.querySelector('.btn-text').textContent = isVideo ? '⬇ 下载视频' : '⬇ 下载全部';
+        downloadBtn.querySelector('.btn-text').textContent = isVideo ? '⬇ 下载视频' : '⬇ 下载全部 ZIP';
         downloadBtn.disabled = false;
         downloadBtn.title = '';
         previewBtn.textContent = isVideo ? '▶ 在线预览' : '🖼 查看图片';
@@ -788,7 +788,58 @@ async function handleDownloadSelected() {
 async function handleDownloadAllImages() {
     if (!currentVideoData?.image_list?.length) return;
     const indices = currentVideoData.image_list.map((_, i) => i);
-    await downloadImagesByIndices(indices);
+    await downloadImagesAsZip(indices);
+}
+
+async function downloadImagesAsZip(indices) {
+    const referer = getReferer(currentVideoData.platform);
+    const total = indices.length;
+    const title = sanitizeFilename((currentVideoData.title || 'images').substring(0, 50));
+    const files = [];
+    let done = 0;
+
+    showToast(`开始打包 ${total} 张图片...`, 'info');
+    setImageDownloadLoading(true, `打包中 0/${total}`);
+    progressBar.style.display = 'block';
+    progressFill.style.width = '0%';
+    progressText.textContent = `0/${total}`;
+    showStatus(statusBar, '⏳ 正在下载图片并生成 ZIP...', 'info');
+
+    for (const i of indices) {
+        const imgUrl = currentVideoData.image_list[i];
+        if (!imgUrl) continue;
+        try {
+            const resp = await fetch(`${API_BASE}/api/proxy?video_url=${encodeURIComponent(imgUrl)}&referer=${encodeURIComponent(referer)}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            const ext = getImageExtension(imgUrl, blob.type);
+            files.push({ name: `${title}_${String(i + 1).padStart(2, '0')}.${ext}`, blob });
+            done++;
+            const pct = Math.round((done / total) * 100);
+            progressFill.style.width = `${pct}%`;
+            progressText.textContent = `${done}/${total}`;
+            setImageDownloadLoading(true, `打包中 ${done}/${total}`);
+        } catch {
+            showToast(`第 ${i + 1} 张下载失败`, 'error');
+        }
+    }
+
+    if (!files.length) {
+        showStatus(statusBar, '❌ 图片下载失败，未生成 ZIP', 'error');
+        showToast('图片下载失败，未生成 ZIP', 'error');
+        setImageDownloadLoading(false);
+        setTimeout(() => { progressBar.style.display = 'none'; }, 1500);
+        return;
+    }
+
+    const zipBlob = await createZipBlob(files);
+    downloadBlob(zipBlob, `${title}.zip`);
+    progressFill.style.width = '100%';
+    progressText.textContent = `${files.length}/${total}`;
+    showStatus(statusBar, `✅ ZIP 已生成：${files.length}/${total} 张图片`, files.length === total ? 'success' : 'warning');
+    showToast(`${files.length}/${total} 张图片已打包下载`, files.length === total ? 'success' : 'warning');
+    setImageDownloadLoading(false);
+    setTimeout(() => { progressBar.style.display = 'none'; }, 1500);
 }
 
 async function downloadImagesByIndices(indices) {
@@ -799,6 +850,7 @@ async function downloadImagesByIndices(indices) {
     downloadBtn.disabled = true;
     progressBar.style.display = 'block';
 
+    const title = sanitizeFilename((currentVideoData.title || 'image').substring(0, 30));
     let done = 0;
     for (const i of indices) {
         const imgUrl = currentVideoData.image_list[i];
@@ -806,11 +858,8 @@ async function downloadImagesByIndices(indices) {
         try {
             const resp = await fetch(`${API_BASE}/api/proxy?video_url=${encodeURIComponent(imgUrl)}&referer=${encodeURIComponent(referer)}`);
             const blob = await resp.blob();
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `${(currentVideoData.title || 'image').substring(0, 30)}_${i + 1}.jpg`;
-            a.click();
-            URL.revokeObjectURL(a.href);
+            const ext = getImageExtension(imgUrl, blob.type);
+            downloadBlob(blob, `${title}_${i + 1}.${ext}`);
             done++;
             const pct = Math.round((done / total) * 100);
             progressFill.style.width = pct + '%';
@@ -821,7 +870,7 @@ async function downloadImagesByIndices(indices) {
             showToast(`第 ${i + 1} 张下载失败`, 'error');
         }
     }
-    downloadBtn.querySelector('.btn-text').textContent = `⬇ 下载全部`;
+    downloadBtn.querySelector('.btn-text').textContent = `⬇ 下载全部 ZIP`;
     downloadBtn.disabled = false;
     setTimeout(() => { progressBar.style.display = 'none'; }, 1500);
     showToast(`${done}/${total} 张图片下载完成`, done === total ? 'success' : 'warning');
@@ -1214,3 +1263,130 @@ function showToast(message, type = 'info') {
     container.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
 }
+
+function setImageDownloadLoading(loading, text = '') {
+    downloadBtn.disabled = loading;
+    const selectedBtn = $('#downloadSelectedBtn');
+    const allBtn = $('#downloadAllImagesBtn');
+    if (selectedBtn) selectedBtn.disabled = loading;
+    if (allBtn) {
+        allBtn.disabled = loading;
+        allBtn.textContent = loading ? text : '⬇ 下载全部 ZIP';
+    }
+    downloadBtn.querySelector('.btn-text').textContent = loading ? `⬇ ${text}` : '⬇ 下载全部 ZIP';
+}
+
+function sanitizeFilename(name) {
+    return String(name || 'download').replace(/[\\/:*?"<>|]/g, '_').trim() || 'download';
+}
+
+function getImageExtension(url, mimeType = '') {
+    const typeMap = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif' };
+    if (typeMap[mimeType]) return typeMap[mimeType];
+    const cleanUrl = String(url).split('?')[0];
+    const match = cleanUrl.match(/\.([a-zA-Z0-9]{2,5})$/);
+    return match ? match[1].toLowerCase() : 'jpg';
+}
+
+function downloadBlob(blob, filename) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+async function createZipBlob(files) {
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+
+    for (const file of files) {
+        const data = new Uint8Array(await file.blob.arrayBuffer());
+        const nameBytes = encoder.encode(file.name);
+        const crc = crc32(data);
+        const localHeader = createZipLocalHeader(nameBytes, crc, data.length);
+        localParts.push(localHeader, nameBytes, data);
+        centralParts.push(createZipCentralHeader(nameBytes, crc, data.length, offset), nameBytes);
+        offset += localHeader.length + nameBytes.length + data.length;
+    }
+
+    const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+    const endRecord = createZipEndRecord(files.length, centralSize, offset);
+    return new Blob([...localParts, ...centralParts, endRecord], { type: 'application/zip' });
+}
+
+function createZipLocalHeader(nameBytes, crc, size) {
+    const header = new Uint8Array(30);
+    const view = new DataView(header.buffer);
+    view.setUint32(0, 0x04034b50, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 0x0800, true);
+    view.setUint16(8, 0, true);
+    view.setUint16(10, 0, true);
+    view.setUint16(12, 0, true);
+    view.setUint32(14, crc, true);
+    view.setUint32(18, size, true);
+    view.setUint32(22, size, true);
+    view.setUint16(26, nameBytes.length, true);
+    view.setUint16(28, 0, true);
+    return header;
+}
+
+function createZipCentralHeader(nameBytes, crc, size, offset) {
+    const header = new Uint8Array(46);
+    const view = new DataView(header.buffer);
+    view.setUint32(0, 0x02014b50, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 20, true);
+    view.setUint16(8, 0x0800, true);
+    view.setUint16(10, 0, true);
+    view.setUint16(12, 0, true);
+    view.setUint16(14, 0, true);
+    view.setUint32(16, crc, true);
+    view.setUint32(20, size, true);
+    view.setUint32(24, size, true);
+    view.setUint16(28, nameBytes.length, true);
+    view.setUint16(30, 0, true);
+    view.setUint16(32, 0, true);
+    view.setUint16(34, 0, true);
+    view.setUint16(36, 0, true);
+    view.setUint32(38, 0, true);
+    view.setUint32(42, offset, true);
+    return header;
+}
+
+function createZipEndRecord(fileCount, centralSize, centralOffset) {
+    const record = new Uint8Array(22);
+    const view = new DataView(record.buffer);
+    view.setUint32(0, 0x06054b50, true);
+    view.setUint16(4, 0, true);
+    view.setUint16(6, 0, true);
+    view.setUint16(8, fileCount, true);
+    view.setUint16(10, fileCount, true);
+    view.setUint32(12, centralSize, true);
+    view.setUint32(16, centralOffset, true);
+    view.setUint16(20, 0, true);
+    return record;
+}
+
+function crc32(data) {
+    let crc = -1;
+    for (let i = 0; i < data.length; i++) {
+        crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ data[i]) & 0xff];
+    }
+    return (crc ^ -1) >>> 0;
+}
+
+const CRC32_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) {
+            c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        }
+        table[i] = c >>> 0;
+    }
+    return table;
+})();
