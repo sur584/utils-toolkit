@@ -9,6 +9,16 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _proxy_args() -> list[str]:
+    """返回 yt-dlp 代理参数。海外平台（TikTok/YouTube 等）在国内需经代理访问。"""
+    try:
+        from config import get_active_proxy
+        proxy = get_active_proxy()
+    except Exception:
+        proxy = ""
+    return ["--proxy", proxy] if proxy else []
+
+
 def find_ytdlp() -> Optional[str]:
     """Find yt-dlp executable. Priority: bundled > system PATH."""
     # 1. Check bundled

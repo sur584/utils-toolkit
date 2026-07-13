@@ -126,6 +126,7 @@ async def get_config():
         "providers": cloud_providers,
         "supported_platforms": [
             {"key": "douyin", "name": "抖音"},
+            {"key": "wechat_channels", "name": "微信视频号"},
             {"key": "bilibili", "name": "B站"},
             {"key": "youtube", "name": "YouTube"},
             {"key": "tiktok", "name": "TikTok"},

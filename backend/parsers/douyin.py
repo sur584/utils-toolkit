@@ -2,13 +2,97 @@
 
 import re
 import json
-from urllib.parse import urlparse
-from typing import Dict, Any
+import html as html_lib
+from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
+from typing import Dict, Any, List, Tuple
 
 from ._utils import _headers, _fetch, _follow_redirects, _make_info, _empty_result, _ok
 
 
 DOMAINS = ["v.douyin.com", "www.douyin.com", "www.iesdouyin.com", "m.douyin.com"]
+
+
+def _normalize_douyin_image_url(url: str) -> str:
+    if not isinstance(url, str):
+        return ""
+    url = html_lib.unescape(url).replace("\\u002F", "/").strip()
+    if not url.startswith(("http://", "https://")):
+        return ""
+
+    try:
+        parts = urlsplit(url)
+        query = []
+        for key, value in parse_qsl(parts.query, keep_blank_values=True):
+            lower_key = key.lower()
+            lower_value = value.lower()
+            if lower_key in ("watermark", "watermark_type") and lower_value not in ("0", "false"):
+                value = "0"
+            elif lower_key in ("wm", "wmark") and lower_value in ("1", "2", "3", "true"):
+                value = "0"
+            query.append((key, value))
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    except Exception:
+        return url
+
+
+def _score_douyin_image_url(url: str, source: str = "") -> int:
+    text = f"{source} {url}".lower()
+    score = 0
+    if source in ("origin_url", "original_url", "large_url"):
+        score += 40
+    elif source in ("display_url", "url_list"):
+        score += 25
+    elif source == "download_url_list":
+        score -= 10
+
+    for marker in ("origin", "original", "large", "tos-cn", "douyinpic", "image"):
+        if marker in text:
+            score += 5
+    for marker in ("watermark", "wm=1", "wm=2", "wm=3", "_wm", "wmark", "new-water", "-water"):
+        if marker in text:
+            score -= 30
+    return score
+
+
+def _collect_douyin_image_urls(value: Any, source: str, results: List[Tuple[int, str]]) -> None:
+    if isinstance(value, str):
+        url = _normalize_douyin_image_url(value)
+        if url:
+            results.append((_score_douyin_image_url(url, source), url))
+        return
+    if isinstance(value, list):
+        for item in value:
+            _collect_douyin_image_urls(item, source, results)
+        return
+    if isinstance(value, dict):
+        if "url_list" in value:
+            _collect_douyin_image_urls(value.get("url_list"), source, results)
+        elif "url" in value:
+            _collect_douyin_image_urls(value.get("url"), source, results)
+
+
+def _get_douyin_image_url(img: dict) -> str:
+    if not isinstance(img, dict):
+        return ""
+
+    candidates: List[Tuple[int, str]] = []
+    for field in ("origin_url", "original_url", "large_url", "display_url", "url"):
+        _collect_douyin_image_urls(img.get(field), field, candidates)
+    for field in ("url_list", "download_url_list"):
+        _collect_douyin_image_urls(img.get(field), field, candidates)
+
+    seen = set()
+    unique_candidates = []
+    for score, url in candidates:
+        if url in seen:
+            continue
+        seen.add(url)
+        unique_candidates.append((score, url))
+
+    if not unique_candidates:
+        return ""
+    unique_candidates.sort(key=lambda item: item[0], reverse=True)
+    return unique_candidates[0][1]
 
 
 async def parse(url: str) -> Dict[str, Any]:
@@ -97,11 +181,9 @@ async def parse(url: str) -> Dict[str, Any]:
     if is_image_post and images:
         image_list = []
         for img in images:
-            url_list = img.get("download_url_list") or img.get("url_list") or []
-            if url_list:
-                img_url = url_list[0]
-                if img_url:
-                    image_list.append(img_url)
+            img_url = _get_douyin_image_url(img)
+            if img_url:
+                image_list.append(img_url)
         if image_list:
             info["image_list"] = image_list
             info["note_type"] = "image"

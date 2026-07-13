@@ -40,6 +40,10 @@ class ParseRequest(BaseModel):
 class BatchParseRequest(BaseModel):
     urls: List[str]
 
+class ParseProfileRequest(BaseModel):
+    url: str
+    limit: int = 20
+
 # ─── 文字去除相关懒加载 ──────────────────────────────
 _rapid_ocr = None
 _lama = None

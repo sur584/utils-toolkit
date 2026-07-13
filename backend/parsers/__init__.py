@@ -117,3 +117,7 @@ async def batch_parse(urls: List[str]) -> List[Dict[str, Any]]:
 
     tasks = [_parse_one(u.strip()) for u in urls if u.strip()]
     return await asyncio.gather(*tasks)
+
+
+# ─── 博主主页批量解析 ────────────────────────────────
+from .profile import parse_profile, detect_profile_url, DEFAULT_PROFILE_LIMIT, MAX_PROFILE_LIMIT  # noqa: E402

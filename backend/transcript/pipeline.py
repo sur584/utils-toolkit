@@ -69,6 +69,12 @@ async def extract_transcript(
         cache_put(url, result)
         return result
 
+    if platform == "wechat_channels":
+        # 微信视频号：复用视频下载功能的解析器拿直链，再走 ASR（yt-dlp 不支持）
+        result = await _extract_wechat(url, method, language, settings, progress)
+        cache_put(url, result)
+        return result
+
     # 其他平台：使用 yt-dlp
     result = await _extract_ytdlp(url, platform, method, language, settings, progress)
     cache_put(url, result)
@@ -134,6 +140,77 @@ async def _extract_douyin(url: str, method: str, language: str, settings, progre
         "cover": info.get("cover", ""),
         "video_url": info.get("video_url", ""),
         "duration": info.get("duration", 0),
+        "char_count": len(transcript),
+    }
+
+
+async def _extract_wechat(url: str, method: str, language: str, settings, progress_cb) -> dict:
+    """微信视频号提取流程 - 复用视频下载解析器拿直链，无平台字幕，直接 ASR"""
+    async def progress(step, pct, msg):
+        if progress_cb:
+            await progress_cb(step, pct, msg)
+
+    # 复用「视频下载」功能已有的视频号解析器（带缓存/重试/多方案兜底）
+    await progress("parsing", 15, "正在解析视频号链接...")
+    from parsers import parse_link
+
+    parsed = await parse_link(url)
+    if not parsed.get("success"):
+        raise RuntimeError(parsed.get("message") or "视频号解析失败")
+
+    data = parsed.get("data") or {}
+    video_url = data.get("video_url", "")
+    if not video_url:
+        raise RuntimeError("视频号解析未获取到视频直链，请在「视频下载」页配置 Yuanbao cookie 后重试")
+
+    title = (data.get("title") or "微信视频号")[:100]
+    author = data.get("author", "未知作者")
+
+    logger.info(f"视频号: {title} by {author}, video_url={video_url[:80]}...")
+
+    if method == "subtitle_only":
+        raise RuntimeError("视频号暂无平台字幕，请使用自动或语音识别模式")
+
+    transcript = None
+    method_used = "asr"
+
+    if method in ("auto", "asr_only"):
+        await progress("asr", 30, "正在下载视频...")
+        async with temp_workspace() as tmp:
+            # 复用下载服务（自动选策略 + MP4 有效性校验）
+            from services.download_service import DownloadService
+
+            svc = DownloadService(str(tmp))
+            video_path, _, _ = await svc.download(
+                video_url, title=title, referer="https://channels.weixin.qq.com/"
+            )
+
+            await progress("asr", 55, "正在提取音频...")
+            audio_path = await _extract_audio(video_path, str(tmp / "audio"))
+
+            await progress("asr", 65, "正在上传音频...")
+            audio_bytes = Path(audio_path).read_bytes()
+            if len(audio_bytes) > 25 * 1024 * 1024:
+                raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过 25MB 限制")
+
+            await progress("asr", 70, "正在进行语音识别...")
+            transcript = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
+
+    if not transcript:
+        raise RuntimeError("未能提取到文案内容")
+
+    transcript = _to_simplified(transcript)
+    await progress("done", 100, "提取完成")
+
+    return {
+        "method_used": method_used,
+        "transcript": transcript,
+        "title": title,
+        "platform": "wechat_channels",
+        "author": author,
+        "cover": data.get("cover", ""),
+        "video_url": video_url,
+        "duration": data.get("duration", 0),
         "char_count": len(transcript),
     }
 

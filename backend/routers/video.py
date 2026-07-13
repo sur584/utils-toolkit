@@ -17,7 +17,7 @@ from parsers._utils import _is_safe_url, _extract_url
 
 from config import DOWNLOAD_DIR, get_active_proxy
 from deps import (
-    ParseRequest, BatchParseRequest,
+    ParseRequest, BatchParseRequest, ParseProfileRequest,
     _get_client_ip, _add_to_history,
 )
 
@@ -140,6 +140,34 @@ async def batch_parse_videos(req: BatchParseRequest, request: Request):
         if r["success"] and r["data"]:
             _add_to_history(r["data"], ip)
     return {"results": results}
+
+
+@router.post("/api/parse-profile")
+async def parse_profile_endpoint(req: ParseProfileRequest, request: Request):
+    """博主主页批量解析：返回该账号的视频列表"""
+    from parsers import parse_profile
+
+    ip = _get_client_ip(request)
+    raw = req.url.strip()
+    url = _extract_url(raw) or raw
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="请输入有效的 http/https 主页链接")
+    if not _is_safe_url(url):
+        raise HTTPException(status_code=403, detail="不允许访问该地址")
+
+    logger.info(f"[主页解析] 收到请求: {url[:80]}, limit={req.limit}")
+    result = await parse_profile(url, limit=req.limit)
+
+    # 只写 1 条"主页快照"到历史，避免几百条视频淹没历史列表
+    data = result.get("data") or {}
+    videos = data.get("videos") or []
+    if result.get("success") and videos:
+        first = videos[0]
+        _add_to_history({
+            **first,
+            "title": f"[主页] {data.get('author', '')} · {data.get('total', 0)} 个视频",
+        }, ip)
+    return result
 
 
 @router.get("/api/proxy")

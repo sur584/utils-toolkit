@@ -104,27 +104,57 @@ function CompressPanel(){
   const tot=targets.reduce((a,i)=>a+(i.origSize||i.size),0);const comp=targets.reduce((a,i)=>a+(i.cSize||0),0);
   const dn=targets.filter(i=>i.status==='done').length;const sv=comp>0?((1-comp/tot)*100).toFixed(1):0;
 
-  const compressFile=(file,targetBytes,maxW)=>new Promise((resolve,reject)=>{
+  const compressFile=(file,targetBytes)=>new Promise((resolve,reject)=>{
     const img=new Image();
     img.onload=()=>{
-      let w=img.naturalWidth,h=img.naturalHeight;
-      if(maxW&&w>maxW){h=Math.round(h*maxW/w);w=maxW}
-      const canvas=document.createElement('canvas');
-      canvas.width=w;canvas.height=h;
-      const ctx=canvas.getContext('2d');
-      ctx.drawImage(img,0,0,w,h);
-      let lo=0.1,hi=0.95,best=null;
-      const outType=fmt2==='png'?'image/png':fmt2==='webp'?'image/webp':'image/jpeg';
-      const tryQ=(q)=>{
-        canvas.toBlob(b=>{
-          if(!b){reject(new Error('canvas toBlob failed'));return}
-          if(b.size<=targetBytes||lo>=hi){resolve(b);return}
-          if(b.size>targetBytes){hi=q-(hi-lo)/2}else{lo=q+(hi-lo)/2}
-          if(hi-lo<0.02){resolve(b);return}
-          tryQ((lo+hi)/2);
-        },outType,q);
+      const ow=img.naturalWidth,oh=img.naturalHeight;
+      // “保持原格式”时沿用源文件 MIME，避免把 PNG 悄悄转成 JPEG
+      const outType=fmt2==='png'?'image/png':fmt2==='webp'?'image/webp':fmt2==='jpg'?'image/jpeg':(file.type||'image/jpeg');
+      const lossless=outType==='image/png';
+      const render=scale=>{
+        const w=Math.max(1,Math.round(ow*scale)),h=Math.max(1,Math.round(oh*scale));
+        const canvas=document.createElement('canvas');
+        canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        return canvas;
       };
-      tryQ(0.76);
+      const encode=(canvas,q)=>new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('canvas toBlob failed')),outType,q));
+      (async()=>{
+        if(lossless){
+          // PNG 无质量参数，只能通过缩放尺寸逼近目标体积
+          const full=await encode(render(1));
+          if(full.size<=targetBytes){resolve(full);return}
+          let lo=0.05,hi=1,best=null;
+          for(let i=0;i<8&&hi-lo>0.01;i++){
+            const mid=(lo+hi)/2;const b=await encode(render(mid));
+            if(b.size<=targetBytes){best=b;lo=mid}else{hi=mid}
+          }
+          resolve(best||await encode(render(lo)));
+          return;
+        }
+        // 有损格式：原尺寸下若最高质量仍不超标，直接返回（无法更贴近目标）
+        const full=render(1);
+        const hiBlob=await encode(full,1);
+        if(hiBlob.size<=targetBytes){resolve(hiBlob);return}
+        // 若最低质量仍超标，则固定较高画质、缩放尺寸逼近目标
+        const loBlob=await encode(full,0.05);
+        if(loBlob.size>targetBytes){
+          let lo=0.05,hi=1,best=null;
+          for(let i=0;i<8&&hi-lo>0.01;i++){
+            const mid=(lo+hi)/2;const b=await encode(render(mid),0.85);
+            if(b.size<=targetBytes){best=b;lo=mid}else{hi=mid}
+          }
+          resolve(best||loBlob);
+          return;
+        }
+        // 质量二分：保证体积 <= 目标前提下尽量提高质量
+        let lo=0.05,hi=1,best=loBlob;
+        for(let i=0;i<8&&hi-lo>0.01;i++){
+          const mid=(lo+hi)/2;const b=await encode(full,mid);
+          if(b.size<=targetBytes){best=b;lo=mid}else{hi=mid}
+        }
+        resolve(best);
+      })().catch(reject);
     };
     img.onerror=reject;
     img.src=URL.createObjectURL(file);
@@ -142,9 +172,7 @@ function CompressPanel(){
         const origState={name:img.name,file:img.file,blob:img.blob,thumb:img.thumb,size:img.size,cSize:img.cSize,cUrl:img.cUrl,status:img.status,progress:img.progress};
         upd(img.id,{status:'compressing',progress:30});
         try{
-          const sizeRatio=tb/inputSize;
-          const maxW=sizeRatio<0.15?1200:sizeRatio<0.3?1920:sizeRatio<0.5?2560:99999;
-          const c=await compressFile(input,tb,maxW);
+          const c=await compressFile(input,tb);
           const url=URL.createObjectURL(c);
           const newFile=processedFile(c,img.name);
           if(img.cUrl)URL.revokeObjectURL(img.cUrl);

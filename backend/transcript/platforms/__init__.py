@@ -2,9 +2,11 @@ from urllib.parse import urlparse
 from typing import Optional
 
 DOUYIN_DOMAINS = ["v.douyin.com", "www.douyin.com", "www.iesdouyin.com", "m.douyin.com"]
+WECHAT_DOMAINS = ["channels.weixin.qq.com", "weixin.qq.com"]
 
 PLATFORM_DOMAINS = {
     "douyin": DOUYIN_DOMAINS,
+    "wechat_channels": WECHAT_DOMAINS,
 }
 
 
