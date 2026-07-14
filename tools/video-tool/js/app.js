@@ -204,6 +204,35 @@ const proxyStatus = $('#proxyStatus');
 let currentVideoData = null;
 let selectedImages = new Set();
 const activeDownloads = new Set();
+let downloadAbortController = null;  // 单视频下载的取消控制器（非空 = 正在下载）
+
+// ─── 博主主页 DOM 引用与状态 ─────────────────────
+const profileInput = $('#profileInput');
+const profileLimit = $('#profileLimit');
+const profilePasteBtn = $('#profilePasteBtn');
+const profileParseBtn = $('#profileParseBtn');
+const profileStatus = $('#profileStatus');
+const profileHeader = $('#profileHeader');
+const profileAuthorName = $('#profileAuthorName');
+const profileMeta = $('#profileMeta');
+const profileSelectAll = $('#profileSelectAll');
+const profileSelectedCount = $('#profileSelectedCount');
+const profileDownloadSelectedBtn = $('#profileDownloadSelectedBtn');
+const profileZipBtn = $('#profileZipBtn');
+const profileCopyLinksBtn = $('#profileCopyLinksBtn');
+const profileGrid = $('#profileGrid');
+const profilePager = $('#profilePager');
+const profilePrevBtn = $('#profilePrevBtn');
+const profileNextBtn = $('#profileNextBtn');
+const profilePageInfo = $('#profilePageInfo');
+
+let profileVideos = [];
+const profileSelected = new Set();
+let profilePage = 1;
+let profileHasMore = false;
+let profileTotalPages = null;
+let profileUrl = '';
+let profilePlatform = null;
 
 // ─── 代理自动检测 ────────────────────────────────
 
@@ -305,6 +334,24 @@ function initEventListeners() {
     if (downloadSelectedBtn) downloadSelectedBtn.addEventListener('click', handleDownloadSelected);
     if (downloadAllImagesBtn) downloadAllImagesBtn.addEventListener('click', handleDownloadAllImages);
     if (copySelectedLinksBtn) copySelectedLinksBtn.addEventListener('click', handleCopySelectedLinks);
+
+    // 博主主页
+    if (profilePasteBtn) profilePasteBtn.addEventListener('click', async () => {
+        const t = await readClipboard();
+        if (t) profileInput.value = t;
+    });
+    if (profileParseBtn) profileParseBtn.addEventListener('click', () => handleProfileParse(1));
+    if (profileInput) profileInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); handleProfileParse(1); }
+    });
+    if (profileSelectAll) profileSelectAll.addEventListener('change', handleProfileSelectAll);
+    if (profileDownloadSelectedBtn) profileDownloadSelectedBtn.addEventListener('click', handleProfileDownloadSelected);
+    if (profileZipBtn) profileZipBtn.addEventListener('click', handleProfileDownloadZip);
+    if (profileCopyLinksBtn) profileCopyLinksBtn.addEventListener('click', handleProfileCopyLinks);
+    if (profilePrevBtn) profilePrevBtn.addEventListener('click', () => { if (profilePage > 1) handleProfileParse(profilePage - 1); });
+    if (profileNextBtn) profileNextBtn.addEventListener('click', () => { if (profileHasMore) handleProfileParse(profilePage + 1); });
+    // 改「每页数量」后从第 1 页重新解析，避免翻页中途改数量导致偏移错位
+    if (profileLimit) profileLimit.addEventListener('change', () => { if (profileUrl) handleProfileParse(1); });
 
     // 手动输入视频URL
     const applyVideoUrlBtn = document.getElementById('applyVideoUrlBtn');
@@ -601,15 +648,16 @@ function renderVideoResult(data) {
 
 // ─── 下载 ────────────────────────────────────────
 function setDownloadLoading(loading) {
-    /** 设置下载按钮加载状态 */
+    /** 设置下载按钮加载状态；下载中按钮保持可点击以便取消 */
     downloadBtn.querySelector('.btn-text').style.display = loading ? 'none' : 'inline';
     downloadBtn.querySelector('.btn-loading').style.display = loading ? 'inline-flex' : 'none';
-    downloadBtn.disabled = loading;
+    downloadBtn.disabled = false;
 }
 
 async function handleDownload() {
-    if (downloadBtn.disabled) {
-        showToast('正在下载，请稍候', 'info');
+    // 正在下载时再次点击 = 取消
+    if (downloadAbortController) {
+        downloadAbortController.abort();
         return;
     }
 
@@ -637,11 +685,13 @@ async function handleDownload() {
 
     if (!currentVideoData?.video_url) { showToast('无可用下载地址', 'error'); return; }
 
+    downloadAbortController = new AbortController();
+    const signal = downloadAbortController.signal;
     setDownloadLoading(true);
     progressBar.style.display = 'block';
     progressFill.style.width = '0%';
     progressText.textContent = '0%';
-    showStatus(statusBar, '⏳ 正在获取视频...', 'info');
+    showStatus(statusBar, '⏳ 正在获取视频（可点击按钮取消）...', 'info');
 
     try {
         const videoUrl = currentVideoData.video_url_no_watermark || currentVideoData.video_url || '';
@@ -650,12 +700,12 @@ async function handleDownload() {
 
         // 对于需要中继的平台（如 TikTok），优先客户端直连下载（浏览器使用客户端的代理/VPN）
         if (NEEDS_RELAY.includes(currentVideoData.platform)) {
-            const done = await _relayDownload(videoUrl, title, ref);
+            const done = await _relayDownload(videoUrl, title, ref, signal);
             if (done) return;
             // 客户端下载失败，回退到服务端下载
         }
 
-        const resp = await fetch(`${API_BASE}/api/download?video_url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title)}&referer=${encodeURIComponent(ref)}`);
+        const resp = await fetch(`${API_BASE}/api/download?video_url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title)}&referer=${encodeURIComponent(ref)}`, { signal });
 
         if (!resp.ok) {
             let detail = `HTTP ${resp.status}`;
@@ -676,32 +726,41 @@ async function handleDownload() {
         a.click();
         URL.revokeObjectURL(a.href);
         showToast('下载完成', 'success');
-        setDownloadLoading(false);
         progressFill.style.width = '100%';
         progressText.textContent = '100%';
         showStatus(statusBar, '✅ 下载完成', 'success');
     } catch (err) {
-        showToast(`下载失败: ${err.message}`, 'error');
-        setDownloadLoading(false);
+        if (err.name === 'AbortError') {
+            showToast('已取消下载', 'info');
+            showStatus(statusBar, '已取消下载', 'info');
+        } else {
+            showToast(`下载失败: ${err.message}`, 'error');
+        }
     } finally {
+        downloadAbortController = null;
         setDownloadLoading(false);
         setTimeout(() => { progressBar.style.display = 'none'; }, 3000);
     }
 }
 
 // 客户端直连下载（利用浏览器所在设备的代理/VPN）
-async function _relayDownload(videoUrl, title, ref) {
+async function _relayDownload(videoUrl, title, ref, signal) {
     // tt:// / yt:// / bl:// 不是真实 URL，跳过客户端直连尝试
     if (videoUrl.startsWith('tt://') || videoUrl.startsWith('yt://') || videoUrl.startsWith('bl://')) {
         return false;
     }
+
+    // 组合外部取消信号与 30s 超时
+    const relaySignal = signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(30000)])
+        : AbortSignal.timeout(30000);
 
     // 先尝试直接 fetch 视频（客户端代理会处理连接）
     try {
         showStatus(statusBar, '🔄 尝试客户端直连下载...', 'info');
         const resp = await fetch(videoUrl, {
             headers: { 'Referer': ref, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-            signal: AbortSignal.timeout(30000),
+            signal: relaySignal,
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const blob = await resp.blob();
@@ -715,14 +774,16 @@ async function _relayDownload(videoUrl, title, ref) {
         progressText.textContent = '100%';
         showStatus(statusBar, '✅ 下载完成', 'success');
         return true;
-    } catch {
+    } catch (e) {
+        // 用户主动取消：向上抛出，由 handleDownload 统一提示，不再回退
+        if (signal?.aborted) throw e;
         // 直连失败，尝试通过 CORS 代理下载
         try {
             showStatus(statusBar, '🔄 尝试通过 CORS 代理下载...', 'info');
             for (const buildProxyUrl of CORS_PROXIES) {
                 try {
                     const proxyUrl = buildProxyUrl(videoUrl);
-                    const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(30000) });
+                    const resp = await fetch(proxyUrl, { signal: relaySignal });
                     if (!resp.ok) continue;
                     const blob = await resp.blob();
                     if (blob.size < 10240) continue;
@@ -735,9 +796,15 @@ async function _relayDownload(videoUrl, title, ref) {
                     progressFill.style.width = '100%';
                     progressText.textContent = '100%';
                     return true;
-                } catch { continue; }
+                } catch (e2) {
+                    if (signal?.aborted) throw e2;
+                    continue;
+                }
             }
-        } catch { /* 所有方式都失败，回退到服务端下载 */ }
+        } catch (e3) {
+            if (signal?.aborted) throw e3;
+            /* 所有方式都失败，回退到服务端下载 */
+        }
     }
     return false;
 }
@@ -1190,8 +1257,8 @@ async function doDownload(videoUrl, title, platform, button) {
     showToast('正在下载...', 'info');
 
     try {
-        // 需要中继的平台优先客户端直连
-        if (NEEDS_RELAY.includes(platform)) {
+        // 需要中继的平台优先客户端直连（仅对 http(s) 直链，自定义协议如 tt:// 直接走服务端）
+        if (NEEDS_RELAY.includes(platform) && /^https?:/i.test(videoUrl)) {
             const ref = getReferer(platform || '');
             try {
                 const resp = await fetch(videoUrl, {
@@ -1230,6 +1297,318 @@ async function doDownload(videoUrl, title, platform, button) {
             button.textContent = originalText;
         }
     }
+}
+
+// ─── 博主主页解析与批量下载 ──────────────────────
+async function handleProfileParse(page = 1) {
+    // page===1 取输入框；翻页复用已保存的 profileUrl
+    const url = page === 1 ? profileInput.value.trim() : profileUrl;
+    if (!url) { showToast('请输入博主主页链接', 'error'); return; }
+
+    profileParseBtn.disabled = true;
+    if (profilePrevBtn) profilePrevBtn.disabled = true;
+    if (profileNextBtn) profileNextBtn.disabled = true;
+    const btnText = profileParseBtn.querySelector('.btn-text');
+    const btnLoading = profileParseBtn.querySelector('.btn-loading');
+    if (btnText) btnText.style.display = 'none';
+    if (btnLoading) btnLoading.style.display = 'inline-flex';
+
+    // 仅新解析（第 1 页）立即清空；翻页时保留当前页，成功后再替换，避免失败抹掉已有结果
+    if (page === 1) {
+        profileHeader.style.display = 'none';
+        profileGrid.innerHTML = '';
+        profileVideos = [];
+        profileSelected.clear();
+    }
+
+    const limit = parseInt(profileLimit.value, 10) || 20;
+    const started = Date.now();
+    showStatus(profileStatus, `🔍 正在解析主页视频列表（第 ${page} 页，可能需要 10~30 秒）...`, 'info');
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/parse-profile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, limit, page }),
+        });
+        const result = await readJsonResponse(resp, '主页解析接口');
+        const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+        const data = result.data || {};
+        const videos = data.videos || [];
+
+        if (!result.success || videos.length === 0) {
+            showStatus(profileStatus, `❌ ${result.message || '未解析到视频'}（${elapsed}s）`, 'error');
+            // 翻页失败：本页已到尽头，禁用「下一页」并保留当前页；新解析失败：隐藏分页条
+            if (page > 1) profileHasMore = false;
+            renderProfilePager();
+            return;
+        }
+
+        profileUrl = url;
+        profilePage = data.page || page;
+        profileHasMore = !!data.has_more;
+        profileTotalPages = data.total_pages || null;
+        profilePlatform = data.platform || null;
+        profileVideos = videos;
+        profileSelected.clear();
+        renderProfileResult(data, elapsed);
+        renderProfilePager();
+    } catch (err) {
+        showStatus(profileStatus, `❌ 解析失败: ${err.message}`, 'error');
+        if (page > 1) profileHasMore = false;
+        renderProfilePager();
+    } finally {
+        profileParseBtn.disabled = false;
+        if (btnText) btnText.style.display = '';
+        if (btnLoading) btnLoading.style.display = 'none';
+    }
+}
+
+function renderProfilePager() {
+    if (!profilePager) return;
+    // 无视频、或 SSR 平台只有 1 页且无更多 → 隐藏分页条
+    const hasNav = profileVideos.length > 0 && (profilePage > 1 || profileHasMore || (profileTotalPages && profileTotalPages > 1));
+    if (!hasNav) { profilePager.style.display = 'none'; return; }
+    profilePager.style.display = 'flex';
+    profilePageInfo.textContent = profileTotalPages
+        ? `第 ${profilePage} / ${profileTotalPages} 页`
+        : `第 ${profilePage} 页`;
+    profilePrevBtn.disabled = profilePage <= 1;
+    profileNextBtn.disabled = !profileHasMore;
+}
+
+function renderProfileResult(data, elapsed) {
+    const platformName = PLATFORM_NAMES[data.platform] || data.platform || '';
+    profileAuthorName.textContent = data.author || '未知博主';
+    profileMeta.textContent = `${platformName} · 共 ${data.total || profileVideos.length} 个视频`;
+    profileHeader.style.display = 'flex';
+
+    profileGrid.innerHTML = profileVideos.map((v, i) => renderProfileCard(v, i)).join('');
+
+    // 绑定卡片交互
+    profileGrid.querySelectorAll('.profile-card').forEach((card) => {
+        const idx = parseInt(card.dataset.idx, 10);
+        const cb = card.querySelector('.check-box input');
+        const dlBtn = card.querySelector('.card-dl-btn');
+
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.card-dl-btn') || e.target.closest('.check-box')) return;
+            toggleProfileSelect(idx, !profileSelected.has(idx));
+        });
+        if (cb) cb.addEventListener('change', () => toggleProfileSelect(idx, cb.checked));
+        if (dlBtn) dlBtn.addEventListener('click', () => downloadProfileVideo(idx, dlBtn));
+    });
+
+    if (profileSelectAll) profileSelectAll.checked = false;
+    updateProfileSelectedCount();
+    showStatus(profileStatus, `✅ 解析成功 — ${platformName}，共 ${profileVideos.length} 个视频（${elapsed}s）`, 'success');
+}
+
+function renderProfileCard(v, idx) {
+    const cover = v.cover ? `<img class="card-cover" src="${escAttr(v.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">` : '<div class="card-cover card-cover-empty">无封面</div>';
+    const durationBadge = v.duration ? `<span class="duration-badge">${formatDuration(v.duration)}</span>` : '';
+    const title = esc(v.title || '无标题');
+    return `
+        <div class="profile-card" data-idx="${idx}">
+            <div class="cover-wrap">
+                ${cover}
+                ${durationBadge}
+                <label class="check-box"><input type="checkbox"></label>
+            </div>
+            <div class="card-body">
+                <div class="card-title" title="${escAttr(v.title || '')}">${title}</div>
+                <div class="card-actions">
+                    <button class="btn btn-primary btn-sm card-dl-btn">⬇ 下载</button>
+                </div>
+            </div>
+        </div>`;
+}
+
+function toggleProfileSelect(idx, selected) {
+    const card = profileGrid.querySelector(`.profile-card[data-idx="${idx}"]`);
+    const cb = card ? card.querySelector('.check-box input') : null;
+    if (selected) {
+        profileSelected.add(idx);
+        if (card) card.classList.add('selected');
+    } else {
+        profileSelected.delete(idx);
+        if (card) card.classList.remove('selected');
+    }
+    if (cb) cb.checked = selected;
+    updateProfileSelectedCount();
+}
+
+function handleProfileSelectAll() {
+    const selectAll = profileSelectAll.checked;
+    profileVideos.forEach((_, idx) => toggleProfileSelect(idx, selectAll));
+}
+
+function updateProfileSelectedCount() {
+    const total = profileVideos.length;
+    const selected = profileSelected.size;
+    profileSelectedCount.textContent = `已选 ${selected} / ${total}`;
+    profileDownloadSelectedBtn.disabled = selected === 0;
+    if (profileSelectAll) profileSelectAll.checked = total > 0 && selected === total;
+}
+
+// 单个视频下载：tt://yt://bl:// 直接复用 doDownload；抖音/小红书 need_reparse 先取直链
+async function downloadProfileVideo(idx, button) {
+    const v = profileVideos[idx];
+    if (!v) return;
+
+    if (v.need_reparse) {
+        const originalText = button ? button.textContent : '';
+        if (button) { button.disabled = true; button.textContent = '解析中...'; }
+        try {
+            const resp = await fetch(`${API_BASE}/api/parse`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: v.detail_url || v.video_url }),
+            });
+            const result = await readJsonResponse(resp, '视频解析接口');
+            if (!result.success || !result.data || !result.data.video_url) {
+                showToast(`「${(v.title || '视频').substring(0, 12)}」解析失败`, 'error');
+                return;
+            }
+            await doDownload(result.data.video_url, v.title || result.data.title, result.data.platform || v.platform, button);
+        } catch (err) {
+            showToast(`解析失败: ${err.message}`, 'error');
+        } finally {
+            if (button) { button.disabled = false; button.textContent = originalText; }
+        }
+        return;
+    }
+
+    await doDownload(v.video_url, v.title, v.platform, button);
+}
+
+// 串行逐个下载，每个间隔 800ms
+async function handleProfileDownloadSelected() {
+    if (profileSelected.size === 0) { showToast('请先选择视频', 'error'); return; }
+    const indices = Array.from(profileSelected).sort((a, b) => a - b);
+
+    profileDownloadSelectedBtn.disabled = true;
+    const originalText = profileDownloadSelectedBtn.textContent;
+    let done = 0;
+
+    for (const idx of indices) {
+        done += 1;
+        profileDownloadSelectedBtn.textContent = `下载中 ${done}/${indices.length}...`;
+        const card = profileGrid.querySelector(`.profile-card[data-idx="${idx}"]`);
+        const dlBtn = card ? card.querySelector('.card-dl-btn') : null;
+        await downloadProfileVideo(idx, dlBtn);
+        if (done < indices.length) await new Promise((r) => setTimeout(r, 800));
+    }
+
+    profileDownloadSelectedBtn.textContent = originalText;
+    profileDownloadSelectedBtn.disabled = false;
+    showToast(`已触发 ${indices.length} 个视频下载`, 'success');
+}
+
+function handleProfileCopyLinks() {
+    const indices = profileSelected.size > 0
+        ? Array.from(profileSelected).sort((a, b) => a - b)
+        : profileVideos.map((_, i) => i);
+    if (indices.length === 0) { showToast('没有可复制的链接', 'error'); return; }
+    const links = indices.map((i) => {
+        const v = profileVideos[i];
+        return v.detail_url || v.video_url || '';
+    }).filter(Boolean).join('\n');
+    navigator.clipboard.writeText(links)
+        .then(() => showToast(`已复制 ${indices.length} 个链接`, 'success'))
+        .catch(() => showToast('复制失败', 'error'));
+}
+
+// 取单个主页视频的 blob（need_reparse 先取直链），失败返回 null
+async function fetchProfileVideoBlob(v) {
+    let videoUrl = v.video_url;
+    let platform = v.platform;
+    let title = v.title || 'video';
+
+    if (v.need_reparse) {
+        const resp = await fetch(`${API_BASE}/api/parse`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: v.detail_url || v.video_url }),
+        });
+        const result = await readJsonResponse(resp, '视频解析接口');
+        if (!result.success || !result.data || !result.data.video_url) return null;
+        videoUrl = result.data.video_url;
+        platform = result.data.platform || platform;
+        title = v.title || result.data.title || title;
+    }
+    if (!videoUrl) return null;
+
+    const ref = getReferer(platform);
+    const dlResp = await fetch(`${API_BASE}/api/download?video_url=${encodeURIComponent(videoUrl)}&title=${encodeURIComponent(title.substring(0, 50))}&referer=${encodeURIComponent(ref)}`);
+    if (!dlResp.ok) return null;
+    return await dlResp.blob();
+}
+
+// 打包本页为 ZIP：选中则打包选中，未选则打包本页全部（串行取 blob，浏览器端打包）
+async function handleProfileDownloadZip() {
+    const indices = profileSelected.size > 0
+        ? Array.from(profileSelected).sort((a, b) => a - b)
+        : profileVideos.map((_, i) => i);
+    if (indices.length === 0) { showToast('本页没有可打包的视频', 'error'); return; }
+    if (indices.length > 20) {
+        showToast('视频较多，浏览器端打包会占用较多内存，请耐心等待…', 'warning');
+    }
+
+    profileZipBtn.disabled = true;
+    const originalText = profileZipBtn.textContent;
+    const total = indices.length;
+    const files = [];
+    const failed = [];
+    let done = 0;
+
+    for (const idx of indices) {
+        done += 1;
+        profileZipBtn.textContent = `打包中 ${done}/${total}...`;
+        showStatus(profileStatus, `⏳ 正在下载并打包（${done}/${total}）...`, 'info');
+        const v = profileVideos[idx];
+        const seq = String(idx + 1).padStart(2, '0');
+        const shortTitle = (v.title || '视频').substring(0, 24);
+        try {
+            const blob = await fetchProfileVideoBlob(v);
+            if (!blob) { failed.push({ seq, title: shortTitle }); continue; }
+            const name = `${seq}_${sanitizeFilename((v.title || 'video').substring(0, 40))}.mp4`;
+            files.push({ name, blob });
+        } catch (err) {
+            failed.push({ seq, title: shortTitle, reason: err.message });
+        }
+    }
+
+    profileZipBtn.textContent = originalText;
+    profileZipBtn.disabled = false;
+
+    // 失败清单（多行，序号与 ZIP 内文件名前缀一致，便于对照）
+    const failText = failed.length
+        ? `\n⚠ ${failed.length} 个下载失败：\n` +
+          failed.map((f) => `  #${f.seq} ${f.title}${f.reason ? `（${f.reason}）` : ''}`).join('\n')
+        : '';
+
+    if (files.length === 0) {
+        showStatus(profileStatus, '❌ 全部下载失败，未生成 ZIP' + failText, 'error');
+        showToast(`全部下载失败（共 ${total} 个），未生成 ZIP`, 'error');
+        return;
+    }
+
+    showStatus(profileStatus, '📦 正在生成 ZIP...', 'info');
+    const zipBlob = await createZipBlob(files);
+    const author = sanitizeFilename(profileAuthorName.textContent || 'profile');
+    downloadBlob(zipBlob, `${author}-第${profilePage}页.zip`);
+    showStatus(
+        profileStatus,
+        `✅ ZIP 已生成：成功 ${files.length}/${total} 个视频` + failText,
+        failed.length ? 'warning' : 'success'
+    );
+    showToast(
+        failed.length
+            ? `已打包 ${files.length}/${total}，${failed.length} 个失败（详见状态栏）`
+            : `${files.length} 个视频已打包下载`,
+        failed.length ? 'warning' : 'success'
+    );
 }
 
 // ─── 工具函数 ────────────────────────────────────
@@ -1289,11 +1668,15 @@ function getImageExtension(url, mimeType = '') {
 }
 
 function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.href = url;
     a.download = filename;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href);
+    document.body.removeChild(a);
+    // 延迟撤销：a.click() 异步启动下载，立即 revoke 会让大 blob（如整页 ZIP）下载失败
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 async function createZipBlob(files) {

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import ipaddress
 import logging
+import threading
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -18,11 +19,34 @@ from parsers._utils import _is_safe_url, _extract_url
 from config import DOWNLOAD_DIR, get_active_proxy
 from deps import (
     ParseRequest, BatchParseRequest, ParseProfileRequest,
-    _get_client_ip, _add_to_history,
+    _get_client_ip, _add_to_history, ytdlp_semaphore,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class _DownloadCancelled(Exception):
+    """客户端在下载途中断开连接（点击了取消）"""
+
+
+async def _watch_disconnect(request: Request, event: threading.Event):
+    """等待客户端断开连接（点击取消）。
+
+    直接 await ASGI receive 通道，阻塞到 http.disconnect 到达为止——
+    比 request.is_disconnected() 的零超时轮询可靠（后者在 uvicorn 下常检测不到断开）。
+    """
+    try:
+        while True:
+            message = await request._receive()
+            if message.get("type") == "http.disconnect":
+                event.set()
+                logger.info("[下载] 检测到客户端断开，触发取消")
+                return
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"[下载] 断连监视异常: {e}")
 
 
 @router.get("/api/health")
@@ -155,13 +179,13 @@ async def parse_profile_endpoint(req: ParseProfileRequest, request: Request):
     if not _is_safe_url(url):
         raise HTTPException(status_code=403, detail="不允许访问该地址")
 
-    logger.info(f"[主页解析] 收到请求: {url[:80]}, limit={req.limit}")
-    result = await parse_profile(url, limit=req.limit)
+    logger.info(f"[主页解析] 收到请求: {url[:80]}, limit={req.limit}, page={req.page}")
+    result = await parse_profile(url, limit=req.limit, page=req.page)
 
-    # 只写 1 条"主页快照"到历史，避免几百条视频淹没历史列表
+    # 只写 1 条"主页快照"到历史，避免几百条视频淹没历史列表；翻页不重复写
     data = result.get("data") or {}
     videos = data.get("videos") or []
-    if result.get("success") and videos:
+    if result.get("success") and videos and req.page == 1:
         first = videos[0]
         _add_to_history({
             **first,
@@ -211,6 +235,7 @@ async def proxy_video(video_url: str = Query(...), referer: str = Query("https:/
 
 @router.get("/api/download")
 async def download_video(
+    request: Request,
     video_url: str = Query(..., description="视频直链"),
     title: str = Query("video", description="保存文件名"),
     referer: str = Query("https://www.douyin.com/", description="Referer"),
@@ -289,6 +314,12 @@ async def download_video(
 
         def _download_with_ytdlp():
             import yt_dlp
+
+            def _progress_hook(d):
+                if cancel_event.is_set():
+                    logger.info(f"[下载] {platform_name} progress_hook 感知取消，中止 yt-dlp")
+                    raise _DownloadCancelled()
+
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
@@ -296,6 +327,10 @@ async def download_video(
                 "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                 "merge_output_format": "mp4",
                 "nocheckcertificate": True,
+                "progress_hooks": [_progress_hook],
+                "retries": 3,
+                "fragment_retries": 3,
+                "extractor_retries": 2,
             }
             proxy = get_active_proxy()
             if proxy:
@@ -303,8 +338,56 @@ async def download_video(
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([page_url])
 
+        def _cleanup_partial():
+            for f in DOWNLOAD_DIR.glob(f"{storage_title}.*"):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+
+        cancel_event = threading.Event()
         try:
-            await asyncio.to_thread(_download_with_ytdlp)
+            async with ytdlp_semaphore:
+                watcher = asyncio.create_task(_watch_disconnect(request, cancel_event))
+                try:
+                    # 应用级重试：TikTok 等平台会概率性返回 403 反爬，重试即可成功。
+                    # yt-dlp 原生 retries 覆盖不到 extract 阶段的 403，故在此补一层。
+                    for attempt in range(3):
+                        if cancel_event.is_set():
+                            break
+                        try:
+                            await asyncio.to_thread(_download_with_ytdlp)
+                            break
+                        except _DownloadCancelled:
+                            raise
+                        except Exception as e:
+                            if cancel_event.is_set():
+                                raise
+                            _cleanup_partial()  # 清理残留分片再重试
+                            msg = str(e)
+                            transient = any(k in msg for k in (
+                                "403", "Forbidden", "Unable to download webpage",
+                                "timed out", "Read timed out", "Connection",
+                                "Temporary failure", "EOF", "500", "502", "503",
+                            ))
+                            if attempt < 2 and transient:
+                                logger.warning(
+                                    f"[下载] {platform_name} 第{attempt + 1}次失败({msg[:80]})，1.5s 后重试"
+                                )
+                                # 分片轮询而非固定 sleep，使重试等待期间也能即时响应取消
+                                for _ in range(15):
+                                    if cancel_event.is_set():
+                                        break
+                                    await asyncio.sleep(0.1)
+                                continue
+                            raise
+                finally:
+                    watcher.cancel()
+            # 兜底：若 yt-dlp 吞掉了 hook 抛出的取消异常并正常返回，仍按取消处理
+            if cancel_event.is_set():
+                _cleanup_partial()
+                logger.info(f"[下载] {platform_name} 已被客户端取消: {page_url}")
+                raise HTTPException(status_code=499, detail="下载已取消")
             if not filepath.exists():
                 for f in DOWNLOAD_DIR.glob(f"{storage_title}.*"):
                     filepath = f
@@ -312,9 +395,18 @@ async def download_video(
             if not _is_valid_video(filepath):
                 raise HTTPException(status_code=500, detail=f"{platform_name} 下载失败: 下载的文件不是有效视频")
             return FileResponse(path=str(filepath), filename=f"{display_title}.mp4", media_type="video/mp4")
+        except _DownloadCancelled:
+            _cleanup_partial()
+            logger.info(f"[下载] {platform_name} 已被客户端取消: {page_url}")
+            raise HTTPException(status_code=499, detail="下载已取消")
         except HTTPException:
             raise
         except Exception as e:
+            # yt-dlp 可能把取消异常包装后再抛出，兜底判断
+            if cancel_event.is_set():
+                _cleanup_partial()
+                logger.info(f"[下载] {platform_name} 已被客户端取消: {page_url}")
+                raise HTTPException(status_code=499, detail="下载已取消")
             raise HTTPException(status_code=500, detail=f"{platform_name} 下载失败: {str(e)[:200]}")
 
     # 微信视频号加密视频下载（wx:// 前缀）
@@ -333,17 +425,25 @@ async def download_video(
         if filepath.exists():
             filepath.unlink()
 
+        cancel_event = threading.Event()
+        watcher = asyncio.create_task(_watch_disconnect(request, cancel_event))
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": "https://channels.weixin.qq.com/",
             }
             async with httpx.AsyncClient(timeout=120, verify=False, follow_redirects=True) as client:
-                resp = await client.get(actual_url, headers=headers)
-                if resp.status_code != 200:
-                    raise HTTPException(status_code=502, detail=f"微信视频下载失败 (HTTP {resp.status_code})")
+                async with client.stream("GET", actual_url, headers=headers) as resp:
+                    if resp.status_code != 200:
+                        raise HTTPException(status_code=502, detail=f"微信视频下载失败 (HTTP {resp.status_code})")
 
-                content = resp.content
+                    buf = bytearray()
+                    async for chunk in resp.aiter_bytes(65536):
+                        if cancel_event.is_set():
+                            logger.info("[下载] 微信视频号 已被客户端取消")
+                            raise HTTPException(status_code=499, detail="下载已取消")
+                        buf.extend(chunk)
+                    content = bytes(buf)
 
                 # 如果有解密密钥，需要解密（ISAAC 流密码）
                 if decrypt_key:
@@ -370,6 +470,8 @@ async def download_video(
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"微信视频下载失败: {str(e)}")
+        finally:
+            watcher.cancel()
 
     filename = f"{display_title}.mp4"
     filepath = DOWNLOAD_DIR / f"{storage_title}.mp4"
@@ -377,16 +479,28 @@ async def download_video(
     if filepath.exists() and filepath.stat().st_size > 0:
         return FileResponse(path=str(filepath), filename=filename, media_type="video/mp4")
 
+    cancel_event = threading.Event()
+    watcher = asyncio.create_task(_watch_disconnect(request, cancel_event))
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": referer,
         }
         async with httpx.AsyncClient(timeout=120, verify=False, follow_redirects=True) as client:
-            resp = await client.get(video_url, headers=headers)
-            if resp.status_code != 200:
-                raise HTTPException(status_code=502, detail=f"下载失败 (HTTP {resp.status_code})")
-            filepath.write_bytes(resp.content)
+            async with client.stream("GET", video_url, headers=headers) as resp:
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=502, detail=f"下载失败 (HTTP {resp.status_code})")
+                with open(filepath, "wb") as f:
+                    async for chunk in resp.aiter_bytes(65536):
+                        if cancel_event.is_set():
+                            f.close()
+                            try:
+                                filepath.unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                            logger.info(f"[下载] 已被客户端取消: {video_url[:100]}")
+                            raise HTTPException(status_code=499, detail="下载已取消")
+                        f.write(chunk)
 
         # 验证下载的视频文件
         if not _is_valid_video(filepath):
@@ -403,6 +517,8 @@ async def download_video(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
+    finally:
+        watcher.cancel()
 
 
 # ─── Cookie 管理 ──────────────────────────────────────

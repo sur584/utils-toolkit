@@ -9,8 +9,10 @@ import logging
 from pathlib import Path
 from typing import List
 
+import asyncio
+
 from fastapi import Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services.model_manager import ModelManager
 from services.image_classifier import ImageClassifier
@@ -33,6 +35,9 @@ post_processor = PostProcessor()
 task_queue = TaskQueue()
 disk_cache = DiskCache(cache_dir=str(PROJECT_DIR / "cache"))
 
+# yt-dlp 全局串行锁：低配服务端（i3-9100F）同一时刻最多跑 1 个 yt-dlp 进程
+ytdlp_semaphore = asyncio.Semaphore(1)
+
 # ─── 数据模型 ─────────────────────────────────────────
 class ParseRequest(BaseModel):
     url: str
@@ -42,7 +47,8 @@ class BatchParseRequest(BaseModel):
 
 class ParseProfileRequest(BaseModel):
     url: str
-    limit: int = 20
+    limit: int = Field(default=20, ge=1, le=100)  # 每页数量
+    page: int = Field(default=1, ge=1)  # 页码（从 1 开始）
 
 # ─── 文字去除相关懒加载 ──────────────────────────────
 _rapid_ocr = None

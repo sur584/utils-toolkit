@@ -21,7 +21,7 @@
             <nav class="nav-tabs">
                 <button class="nav-tab active" data-tab="parse">链接解析</button>
                 <button class="nav-tab" data-tab="batch">批量解析</button>
-                <button class="nav-tab" data-tab="profile">博主主页</button>
+                <button class="nav-tab" data-tab="profile">主页解析</button>
                 <button class="nav-tab" data-tab="history">历史记录</button>
             </nav>
             <button class="theme-toggle" id="themeToggle" title="切换主题">
@@ -127,7 +127,7 @@
                         <button class="btn btn-primary btn-lg" id="downloadBtn">
                             <span class="btn-text">⬇ 下载视频</span>
                             <span class="btn-loading" style="display:none">
-                                <span class="spinner"></span> 下载中...
+                                <span class="spinner"></span> 下载中，点击取消
                             </span>
                         </button>
                         <button class="btn btn-secondary btn-lg" id="copyLinkBtn">
@@ -215,12 +215,12 @@
             </div>
         </section>
 
-        <!-- 博主主页批量解析 -->
+        <!-- 主页视频链接批量解析 -->
         <section class="tab-panel" id="panel-profile">
             <div class="card">
                 <div class="card-header">
-                    <h2>博主主页批量解析</h2>
-                    <p class="subtitle">粘贴博主主页链接，解析 TA 的视频列表并批量下载</p>
+                    <h2>主页批量解析</h2>
+                    <p class="subtitle">粘贴主页链接，解析 TA 的视频列表并批量下载</p>
                 </div>
                 <div class="input-group">
                     <input
@@ -228,11 +228,11 @@
                         id="profileInput"
                         class="url-input"
                         style="min-height:48px;padding:12px"
-                        placeholder="粘贴博主主页链接，例如：&#10;https://www.tiktok.com/@neleus0102（TikTok / YouTube 稳定）&#10;https://www.youtube.com/@mkbhd&#10;抖音 / 小红书仅支持首屏（约 10-20 个，翻页受限）"
+                        placeholder="粘贴主页链接，例如：&#10;https://www.tiktok.com/@neleus0102（TikTok / YouTube 稳定）&#10;https://www.youtube.com/@mkbhd&#10;抖音 / 小红书仅支持首屏（约 10-20 个，翻页受限）"
                     >
                     <div class="input-actions">
                         <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text-secondary)">
-                            数量
+                            每页数量
                             <select id="profileLimit" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary)">
                                 <option value="10">10</option>
                                 <option value="20" selected>20</option>
@@ -266,12 +266,20 @@
                         </label>
                         <span class="selected-count" id="profileSelectedCount">已选 0 / 0</span>
                         <button class="btn btn-primary btn-sm" id="profileDownloadSelectedBtn" disabled>⬇ 下载选中</button>
+                        <button class="btn btn-primary btn-sm" id="profileZipBtn">⬇ 打包本页为 ZIP</button>
                         <button class="btn btn-secondary btn-sm" id="profileCopyLinksBtn">🔗 复制选中链接</button>
                     </div>
                 </div>
 
                 <!-- 视频网格 -->
                 <div class="profile-grid" id="profileGrid"></div>
+
+                <!-- 分页条 -->
+                <div class="profile-pager" id="profilePager" style="display:none">
+                    <button class="btn btn-secondary btn-sm" id="profilePrevBtn" disabled>‹ 上一页</button>
+                    <span class="profile-page-info" id="profilePageInfo">第 1 页</span>
+                    <button class="btn btn-secondary btn-sm" id="profileNextBtn" disabled>下一页 ›</button>
+                </div>
             </div>
         </section>
 
