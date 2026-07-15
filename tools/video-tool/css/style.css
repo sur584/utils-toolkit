@@ -895,6 +895,38 @@ body::before {
     color: var(--danger);
 }
 
+/* 批量解析序号徽标（便于定位失败/漏下载的视频） */
+.batch-item-seq {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 解析失败卡片高亮 */
+.batch-item.failed {
+    border-color: rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.06);
+}
+
+/* 重试 / 重新下载按钮 */
+.btn-warning {
+    background: rgba(245, 158, 11, 0.12);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.btn-warning:hover {
+    background: rgba(245, 158, 11, 0.22);
+}
+
 /* ─── 历史记录 ──────────────────────────────── */
 .history-list {
     display: flex;

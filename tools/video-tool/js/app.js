@@ -1256,7 +1256,7 @@ async function handleBatchParse() {
             return relayResult || r;
         }));
         let ok = 0;
-        finalResults.forEach((r) => { if (r.success) ok++; renderBatchItem(r); });
+        finalResults.forEach((r, i) => { if (r.success) ok++; renderBatchItem(r, i + 1, urls[i]); });
         showStatus(batchStatus, `完成: ${ok}/${urls.length} 成功`, ok === urls.length ? 'success' : 'warning');
     } catch (err) {
         showStatus(batchStatus, `❌ 失败: ${err.message}`, 'error');
@@ -1265,15 +1265,18 @@ async function handleBatchParse() {
     }
 }
 
-function renderBatchItem(result) {
+function _buildBatchItem(result, index = 0, url = '') {
     const div = document.createElement('div');
     div.className = 'batch-item';
+    if (index) div.dataset.seq = index;
+    const seqBadge = index ? `<span class="batch-item-seq">${index}</span>` : '';
     if (result.success && result.data) {
         const d = result.data;
         const vUrl = (d.video_url?.startsWith('yt://') || d.video_url?.startsWith('tt://') || d.video_url?.startsWith('bl://') || d.video_url?.startsWith('wx://'))
             ? d.video_url : (d.video_url_no_watermark || d.video_url);
         const pName = PLATFORM_NAMES[d.platform] || d.platform || '';
         div.innerHTML = `
+            ${seqBadge}
             <img class="batch-item-cover" src="${escAttr(d.cover)}" alt="" onerror="this.style.display='none'">
             <div class="batch-item-info">
                 <div class="batch-item-title" title="${esc(d.title)}">${esc(d.title)}</div>
@@ -1285,11 +1288,43 @@ function renderBatchItem(result) {
                 <button class="btn btn-ghost btn-sm js-copy" data-url="${escAttr(vUrl)}">🔗</button>
             </div>`;
     } else {
+        div.classList.add('failed');
         div.innerHTML = `
+            ${seqBadge}
             <div class="batch-item-info"><div class="batch-item-title" style="color:var(--danger)">${esc(result.message)}</div></div>
-            <span class="batch-item-status error">失败</span>`;
+            <span class="batch-item-status error">失败</span>
+            <div class="batch-item-actions">
+                ${url ? `<button class="btn btn-warning btn-sm js-retry" data-url="${escAttr(url)}">↻ 重试</button>` : ''}
+            </div>`;
     }
-    batchResults.appendChild(div);
+    return div;
+}
+
+function renderBatchItem(result, index = 0, url = '') {
+    batchResults.appendChild(_buildBatchItem(result, index, url));
+}
+
+// 单个批量项解析失败后的「重试」：原地重新解析该链接并替换卡片（保留序号）
+async function retryBatchItem(url, div) {
+    if (!div || !url) return;
+    const seq = div.dataset.seq ? parseInt(div.dataset.seq, 10) : 0;
+    div.classList.add('failed');
+    const statusEl = div.querySelector('.batch-item-status');
+    if (statusEl) { statusEl.textContent = '重试中...'; statusEl.className = 'batch-item-status'; statusEl.style.color = 'var(--text-muted)'; statusEl.style.background = 'var(--bg-input)'; }
+    const actionsEl = div.querySelector('.batch-item-actions');
+    if (actionsEl) actionsEl.innerHTML = '';
+    try {
+        const resp = await fetch(`${API_BASE}/api/parse`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+        });
+        const result = await readJsonResponse(resp, '视频解析接口');
+        div.replaceWith(_buildBatchItem(result, seq, url));
+    } catch (err) {
+        showToast(`重试失败: ${err.message}`, 'error');
+        div.replaceWith(_buildBatchItem({ success: false, message: err.message }, seq, url));
+    }
 }
 
 // ─── 历史记录 ────────────────────────────────────
@@ -1342,6 +1377,8 @@ async function handleClearHistory() {
 document.addEventListener('click', (e) => {
     const btn = e.target.closest('.js-download');
     if (btn) { doDownload(btn.dataset.url, btn.dataset.title, btn.dataset.platform, btn); return; }
+    const retryBtn = e.target.closest('.js-retry');
+    if (retryBtn) { retryBatchItem(retryBtn.dataset.url, retryBtn.closest('.batch-item')); return; }
     const copyBtn = e.target.closest('.js-copy');
     if (copyBtn) {
         navigator.clipboard.writeText(copyBtn.dataset.url).then(
@@ -1381,6 +1418,30 @@ document.addEventListener('click', (e) => {
     }
 });
 
+// 客户端直连下载：利用浏览器所在网络直连 CDN，绕过后端代理。
+// 用于后端 /api/download 返回 502/失败时兜底（部分情况下浏览器能直接拉到视频）。
+async function clientDirectDownload(videoUrl, title, platform) {
+    const ref = getReferer(platform || '');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    try {
+        const resp = await fetch(videoUrl, {
+            headers: { 'Referer': ref, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            signal: controller.signal,
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${(title || 'video').substring(0, 50)}.mp4`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        showToast('下载完成（客户端直连）', 'success');
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function doDownload(videoUrl, title, platform, button) {
     const downloadKey = `${platform || ''}:${videoUrl || ''}`;
     if (activeDownloads.has(downloadKey)) {
@@ -1396,6 +1457,7 @@ async function doDownload(videoUrl, title, platform, button) {
     }
     showToast('正在下载...', 'info');
 
+    let failed = false;
     try {
         // 需要中继的平台优先客户端直连（仅对 http(s) 直链，自定义协议如 tt:// 直接走服务端）
         if (NEEDS_RELAY.includes(platform) && /^https?:/i.test(videoUrl)) {
@@ -1429,12 +1491,29 @@ async function doDownload(videoUrl, title, platform, button) {
         URL.revokeObjectURL(a.href);
         showToast('下载完成', 'success');
     } catch (err) {
+        // 后端下载失败（如 502）时，尝试浏览器直连 CDN 兜底
+        if (/^https?:/i.test(videoUrl || '')) {
+            try {
+                await clientDirectDownload(videoUrl, title, platform);
+                return;
+            } catch (_) { /* 直连也失败，保持重试按钮 */ }
+        }
         showToast(`下载失败: ${err.message}`, 'error');
+        failed = true;
     } finally {
         activeDownloads.delete(downloadKey);
         if (button) {
             button.disabled = false;
-            button.textContent = originalText;
+            if (failed) {
+                // 失败：按钮变为「重新下载」，可再次点击重试
+                button.textContent = '重新下载';
+                button.classList.remove('btn-primary');
+                button.classList.add('btn-warning');
+            } else {
+                button.textContent = originalText;
+                button.classList.remove('btn-warning');
+                button.classList.add('btn-primary');
+            }
         }
     }
 }
