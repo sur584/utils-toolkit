@@ -128,10 +128,19 @@ async def parse(url: str) -> Dict[str, Any]:
     if not video_id:
         return _empty_result("无法提取视频 ID")
 
-    page_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
-    html = await _fetch(page_url, headers=_headers(mobile=True), use_proxy=False)
-    if not html:
-        html = await _fetch(page_url, headers=_headers(mobile=True))
+    # 抖音分享页：iesdouyin.com 旧域名已失效（返回空壳页、不再内嵌 item_list），
+    # 优先改用 www.douyin.com 分享页；能拿到 item_list 就用，否则回退旧域名兜底。
+    page_urls = [
+        f"https://www.douyin.com/share/video/{video_id}/",
+        f"https://www.iesdouyin.com/share/video/{video_id}/",
+    ]
+    html = None
+    for page_url in page_urls:
+        html = await _fetch(page_url, headers=_headers(mobile=True), use_proxy=False)
+        if not html:
+            html = await _fetch(page_url, headers=_headers(mobile=True))
+        if html and '"item_list":[' in html:
+            break
     if not html:
         return _empty_result("获取页面失败")
 
