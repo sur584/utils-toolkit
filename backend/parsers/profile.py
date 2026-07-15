@@ -2,21 +2,24 @@
 
 分级策略：
   - TikTok / YouTube / B站：yt-dlp extract_flat 提取列表（TikTok/YouTube 需代理）
-  - 抖音 / 小红书：抓主页首屏 SSR 数据，尽力而为（翻页需签名反爬，不支持）
+  - 抖音 / 小红书：调官方接口（a_bogus / x-s 签名 + 登录 Cookie），游标抓全后按页切片
 """
 
 import re
-import json
 import math
 import time
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional, Callable
-from urllib.parse import urlparse
+import secrets
+from typing import Dict, Any, List, Optional, Callable, Tuple
+from urllib.parse import urlparse, urlsplit, parse_qs, quote
 
-from ._utils import _make_info, _empty_result, _ok, _fetch, _follow_redirects, DESKTOP_UA
+import httpx
+
+from ._utils import _make_info, _empty_result, _ok, _follow_redirects
 from config import get_active_proxy
 from deps import ytdlp_semaphore
+from . import xhs_sign
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,16 @@ _DOUYIN_LIST_CACHE: Dict[str, Dict[str, Any]] = {}   # sec_uid -> {raw, exceeded
 _DOUYIN_CACHE_TTL = 600.0                             # 10 分钟；期内翻页/换每页数量复用，不重复抓
 _DOUYIN_CACHE_MAX = 20                                # 有界，超出淘汰最旧，控内存
 _douyin_fetch_lock = asyncio.Lock()                   # 防同号并发冷启动重复抓全
+
+# 小红书主页「一次抓全 + 内存缓存」参数（结构对齐抖音）
+MAX_XHS_FETCH = 300
+_XHS_LIST_CACHE: Dict[str, Dict[str, Any]] = {}      # user_id -> {raw, exceeded, author, had_cookie, ts}
+_XHS_CACHE_TTL = 600.0
+_XHS_CACHE_MAX = 20
+_xhs_fetch_lock = asyncio.Lock()
+
+_XHS_HOST = "https://edith.xiaohongshu.com"
+_XHS_USER_POSTED = "/api/sns/web/v1/user_posted"
 
 # 单视频 URL 特征（用于排除"这是单视频而非主页"的误判）
 _SINGLE_VIDEO_PATTERNS = {
@@ -54,9 +67,9 @@ _PROFILE_PATTERNS = {
 # yt-dlp 引擎覆盖的平台
 _YTDLP_PLATFORMS = ("tiktok", "youtube", "bilibili")
 # 首屏 SSR 抓取的平台（尽力而为）
-_SSR_PLATFORMS = ("xiaohongshu",)
+_SSR_PLATFORMS = ()
 # 官方 API 抓取的平台（需签名 + 登录 Cookie）
-_API_PLATFORMS = ("douyin",)
+_API_PLATFORMS = ("douyin", "xiaohongshu")
 
 _PLATFORM_HEADERS = {
     "tiktok": {
@@ -94,7 +107,13 @@ def detect_profile_url(url: str) -> Optional[str]:
 
 
 def _normalize_profile_url(url: str, platform: str) -> str:
-    """归一化主页 URL 为 yt-dlp 最稳的形式"""
+    """归一化主页 URL 为各引擎最稳的形式。
+
+    注意：小红书必须保留 query——xsec_token/xsec_source 是 user_posted 接口
+    鉴权与签名的必需参数，不能像其他平台那样 strip。
+    """
+    if platform == "xiaohongshu":
+        return url.strip()  # 保留完整 query
     url = url.split("?")[0].rstrip("/")
     if platform == "youtube":
         path = urlparse(url).path.rstrip("/")
@@ -280,64 +299,7 @@ async def _parse_profile_ytdlp(url: str, platform: str, limit: int, page: int = 
     })
 
 
-# ─── 首屏 SSR 分支（抖音 / 小红书，尽力而为）───────────
-def _extract_json_after(text: str, marker: str) -> Optional[Any]:
-    """从 marker 之后提取一个平衡括号的 JSON 对象/数组（跳过字符串字面量内的括号）"""
-    start = text.find(marker)
-    if start < 0:
-        return None
-    i = start + len(marker)
-    while i < len(text) and text[i] not in "{[":
-        i += 1
-    if i >= len(text):
-        return None
-    open_ch = text[i]
-    close_ch = "}" if open_ch == "{" else "]"
-    depth = 0
-    in_str = False
-    escaped = False
-    for j in range(i, len(text)):
-        c = text[j]
-        if in_str:
-            if escaped:
-                escaped = False
-            elif c == "\\":
-                escaped = True
-            elif c == '"':
-                in_str = False
-            continue
-        if c == '"':
-            in_str = True
-        elif c == open_ch:
-            depth += 1
-        elif c == close_ch:
-            depth -= 1
-            if depth == 0:
-                raw = text[i:j + 1]
-                try:
-                    return json.loads(raw)
-                except Exception:
-                    try:
-                        return json.loads(raw.replace("undefined", "null"))
-                    except Exception:
-                        return None
-    return None
-
-
-def _deep_find_lists(obj: Any, key: str) -> List[Any]:
-    """深度查找所有指定 key 的列表值"""
-    found = []
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if k == key and isinstance(v, list):
-                found.append(v)
-            found.extend(_deep_find_lists(v, key))
-    elif isinstance(obj, list):
-        for item in obj:
-            found.extend(_deep_find_lists(item, key))
-    return found
-
-
+# ─── 官方 API 分支（抖音 / 小红书，游标抓全 + 缓存 + 切片）───────────
 async def _get_douyin_full_list(sec_uid: str, cookie: str) -> Dict[str, Any]:
     """一次性抓全抖音博主投稿列表（上限 MAX_DOUYIN_FETCH），带 per-sec_uid 内存缓存。
 
@@ -493,70 +455,220 @@ async def _parse_profile_douyin(url: str, limit: int, page: int = 1, cookie: str
     })
 
 
-async def _parse_profile_xiaohongshu(url: str, limit: int) -> Dict[str, Any]:
-    headers = {
-        "User-Agent": DESKTOP_UA,
-        "Referer": "https://www.xiaohongshu.com/",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+def extract_xhs_user_id(url: str) -> Tuple[str, str, str]:
+    """从小红书主页 URL 提取 (user_id, xsec_token, xsec_source)。
+
+    URL 形如 /user/profile/<user_id>?xsec_token=...&xsec_source=pc_note
+    xsec_token / xsec_source 是 user_posted 接口鉴权必需，缺 source 缺省 pc_feed。
+    """
+    parts = urlsplit(url)
+    m = re.search(r"/user/profile/([0-9a-fA-F]+)", parts.path)
+    user_id = m.group(1) if m else ""
+    q = parse_qs(parts.query)
+    xsec_token = (q.get("xsec_token") or [""])[0]
+    xsec_source = (q.get("xsec_source") or [""])[0] or "pc_feed"
+    return user_id, xsec_token, xsec_source
+
+
+def _extract_a1(cookie: str) -> str:
+    """从 cookie 串解析 a1 字段值（签名必需）。"""
+    m = re.search(r"(?:^|;)\s*a1=([^;]+)", cookie or "")
+    return m.group(1).strip() if m else ""
+
+
+def _xhs_headers(cookie: str, sign_ret: Dict[str, str]) -> Dict[str, str]:
+    """组装 user_posted 请求头（签名头 + 追踪头 + 模板头 + Cookie）。"""
+    return {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-CN,zh;q=0.9",
+        "Content-Type": "application/json;charset=UTF-8",
+        "Origin": "https://www.xiaohongshu.com",
+        "Referer": "https://www.xiaohongshu.com/",
+        "x-s": sign_ret.get("xs", ""),
+        "x-t": sign_ret.get("xt", ""),
+        "x-s-common": sign_ret.get("xs_common", ""),
+        "x-b3-traceid": secrets.token_hex(8),
+        "x-xray-traceid": secrets.token_hex(16),
+        "Cookie": cookie,
     }
-    html = await _fetch(url, headers=headers)
-    if not html:
-        return _empty_result("小红书主页抓取失败，建议粘贴单个视频链接")
 
-    state = _extract_json_after(html, '__INITIAL_STATE__')
-    if not isinstance(state, dict):
-        return _empty_result("小红书主页首屏无数据（可能被风控），建议粘贴单个视频链接")
 
-    user = state.get("user") or {}
-    author = ""
-    ui = user.get("userPageData") or {}
-    if isinstance(ui, dict):
-        author = (ui.get("basicInfo") or {}).get("nickname", "")
+async def _fetch_xhs_user_posted(
+    user_id: str, cursor: str, cookie: str, a1: str,
+    xsec_token: str, xsec_source: str,
+) -> Tuple[List[Dict[str, Any]], str, bool]:
+    """拉取一批 user_posted，返回 (notes, next_cursor, has_more)。
 
-    videos: List[Dict[str, Any]] = []
-    seen = set()
-    # notes 通常是二维数组
-    for notes in _deep_find_lists(user, "notes"):
-        for group in notes:
-            items = group if isinstance(group, list) else [group]
-            for wrap in items:
-                if not isinstance(wrap, dict):
+    签名入参 api 必须是拼好 query 的完整路径。接口 HTTP 200 但 success=false
+    表示登录失效/风控/token 过期 → 抛 RuntimeError(msg) 由上层转可读提示。
+    """
+    query = (
+        f"num=30&cursor={quote(cursor, safe='')}&user_id={user_id}"
+        f"&image_formats=jpg,webp,avif&xsec_token={quote(xsec_token, safe='')}&xsec_source={xsec_source}"
+    )
+    api = f"{_XHS_USER_POSTED}?{query}"
+
+    sign_ret = await xhs_sign.sign(api, a1, "", "GET")
+    headers = _xhs_headers(cookie, sign_ret)
+
+    async with httpx.AsyncClient(timeout=15.0, verify=False, trust_env=False) as client:
+        r = await client.get(_XHS_HOST + api, headers=headers)
+
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}")
+    try:
+        body = r.json()
+    except Exception:
+        raise RuntimeError("响应非 JSON（可能被风控拦截）")
+
+    if not body.get("success", False):
+        msg = body.get("msg") or f"code={body.get('code')}"
+        raise RuntimeError(msg)
+
+    data = body.get("data") or {}
+    notes = data.get("notes") or []
+    next_cursor = data.get("cursor") or ""
+    has_more = bool(data.get("has_more"))
+    return notes, next_cursor, has_more
+
+
+async def _get_xhs_full_list(
+    user_id: str, cookie: str, a1: str, xsec_token: str, xsec_source: str,
+) -> Dict[str, Any]:
+    """一次性抓全小红书博主笔记（上限 MAX_XHS_FETCH），带 per-user_id 内存缓存。
+
+    游标（cursor/has_more）分页，按 note_id 去重累积至抓完或触顶，供上层按页切片。
+    结构与 _get_douyin_full_list 一致：返回 {"raw","exceeded","author","had_cookie","ts"}。
+    """
+    has_cookie = bool(cookie)
+
+    def _usable(e: Dict[str, Any]) -> bool:
+        if time.time() - e["ts"] >= _XHS_CACHE_TTL:
+            return False
+        if has_cookie and not e.get("had_cookie"):
+            return False
+        return True
+
+    ent = _XHS_LIST_CACHE.get(user_id)
+    if ent and _usable(ent):
+        return ent
+
+    async with _xhs_fetch_lock:
+        ent = _XHS_LIST_CACHE.get(user_id)
+        if ent and _usable(ent):
+            return ent
+
+        collected: List[Dict[str, Any]] = []
+        seen: set = set()
+        cursor = ""
+        has_more = True
+        exceeded = False
+        author = ""
+
+        while has_more and len(collected) < MAX_XHS_FETCH:
+            notes, next_cursor, has_more = await _fetch_xhs_user_posted(
+                user_id, cursor, cookie, a1, xsec_token, xsec_source
+            )
+            if not notes:
+                break
+            for it in notes:
+                if not isinstance(it, dict):
                     continue
-                note = wrap.get("noteCard") or wrap.get("note") or wrap
-                nid = wrap.get("id") or note.get("noteId") or note.get("id") or ""
+                nid = str(it.get("note_id") or "")
                 if not nid or nid in seen:
                     continue
                 seen.add(nid)
-                cover = note.get("cover") or {}
-                cover_url = ""
-                if isinstance(cover, dict):
-                    cover_url = cover.get("urlDefault") or cover.get("url") or ""
-                videos.append(_make_info(
-                    id=nid, platform="xiaohongshu",
-                    title=(note.get("displayTitle") or note.get("title") or "无标题")[:200],
-                    author=author or "未知作者",
-                    cover=cover_url,
-                    video_url=f"https://www.xiaohongshu.com/explore/{nid}",
-                    video_url_no_watermark=f"https://www.xiaohongshu.com/explore/{nid}",
-                    detail_url=f"https://www.xiaohongshu.com/explore/{nid}",
-                    need_reparse=True,
-                ))
-                if len(videos) >= limit:
-                    break
-            if len(videos) >= limit:
+                collected.append(it)
+                if not author:
+                    author = (it.get("user") or {}).get("nickname", "")
+            cursor = next_cursor
+            if len(collected) >= MAX_XHS_FETCH:
+                exceeded = has_more
                 break
-        if len(videos) >= limit:
-            break
+            if has_more:
+                await asyncio.sleep(0.4)
 
-    if not videos:
-        return _empty_result("小红书主页首屏无笔记（可能被风控），建议粘贴单个视频链接")
+        ent = {"raw": collected, "exceeded": exceeded, "author": author,
+               "had_cookie": has_cookie, "ts": time.time()}
+        if user_id not in _XHS_LIST_CACHE and len(_XHS_LIST_CACHE) >= _XHS_CACHE_MAX:
+            oldest = min(_XHS_LIST_CACHE, key=lambda k: _XHS_LIST_CACHE[k]["ts"])
+            _XHS_LIST_CACHE.pop(oldest, None)
+        _XHS_LIST_CACHE[user_id] = ent
+        return ent
+
+
+async def _parse_profile_xiaohongshu(url: str, limit: int, page: int = 1, cookie: str = "") -> Dict[str, Any]:
+    """小红书博主主页：真实 user_posted 接口 + 登录 Cookie + 游标抓全（≤300）后按页切片。
+
+    小红书强制要求 Cookie（anonymous 恒 False）：签名需 cookie 里的 a1，接口需登录态。
+    抓全结果按 user_id 缓存，翻页/换每页数量在 TTL 内复用。下载沿用单视频路径
+    （need_reparse=True，前端回填）。
+    """
+    user_id, xsec_token, xsec_source = extract_xhs_user_id(url)
+    if not user_id:
+        return _empty_result("无法从链接提取小红书用户 ID，请确认是主页链接")
+    if not cookie:
+        return _empty_result("小红书主页解析需要登录 Cookie，请在下方展开并粘贴")
+    a1 = _extract_a1(cookie)
+    if not a1:
+        return _empty_result("Cookie 缺少 a1 字段，请重新从浏览器复制完整登录 Cookie")
+
+    try:
+        ent = await _get_xhs_full_list(user_id, cookie, a1, xsec_token, xsec_source)
+    except RuntimeError as e:
+        msg = str(e)
+        if "签名" in msg or "node" in msg:
+            return _empty_result(f"小红书签名失败：{msg}")
+        return _empty_result(f"小红书接口失败：{msg}（Cookie 可能失效或 xsec_token 过期，请重新从浏览器复制主页链接）")
+    except Exception as e:
+        logger.warning(f"[小红书主页] 请求异常: {type(e).__name__}: {e}")
+        return _empty_result("小红书主页请求异常，请稍后再试")
+
+    raw = ent["raw"]
+    author = ent["author"]
+    if not raw:
+        return _empty_result("未获取到作品（可能 Cookie 失效或 xsec_token 过期，请重新从浏览器复制主页链接）")
+
+    page_size = limit
+    total = len(raw)
+    total_pages = max(1, math.ceil(total / page_size))
+    start = (page - 1) * page_size
+    window = raw[start:start + page_size]
+    if not window:
+        return _empty_result("该页没有作品了")
+
+    videos: List[Dict[str, Any]] = []
+    for it in window:
+        nid = str(it.get("note_id") or "")
+        if not nid:
+            continue
+        cover = it.get("cover") or {}
+        cover_url = ""
+        if isinstance(cover, dict):
+            cover_url = cover.get("url_default") or cover.get("url") or ""
+        note_token = it.get("xsec_token") or xsec_token
+        detail = f"https://www.xiaohongshu.com/explore/{nid}?xsec_token={note_token}"
+        videos.append(_make_info(
+            id=nid, platform="xiaohongshu",
+            title=(it.get("display_title") or "无标题")[:200],
+            author=(it.get("user") or {}).get("nickname", "") or author or "未知作者",
+            cover=cover_url,
+            video_url=detail,
+            video_url_no_watermark=detail,
+            detail_url=detail,
+            need_reparse=True,
+        ))
 
     return _ok({
         "platform": "xiaohongshu", "author": author or "未知作者",
         "profile_url": url, "total": len(videos), "videos": videos,
-        "partial": True, "page": 1, "page_size": limit,
-        "has_more": False, "total_count": len(videos), "total_pages": 1,
+        "page": page, "page_size": page_size,
+        "total_count": total, "total_pages": total_pages,
+        "has_more": page < total_pages,
+        "exceeded_cap": ent["exceeded"],
+        "anonymous": False,
     })
 
 
@@ -594,17 +706,15 @@ async def parse_profile(url: str, limit: int = DEFAULT_PROFILE_LIMIT, page: int 
     if detect_profile_url(url) != platform:
         return _empty_result("请粘贴博主主页链接（不支持合集 / 搜索 / 子页面）")
 
-    # 小红书 仅首屏，不支持翻页（抖音走 API 支持翻页，不在此拦截）
-    if platform in _SSR_PLATFORMS and page > 1:
-        return _empty_result("小红书仅支持首屏，不支持翻页；如需更多请粘贴单个视频链接")
-
     normalized = _normalize_profile_url(url, platform)
-    logger.info(f"[主页解析] platform={platform}, url={normalized}, limit={limit}, page={page}")
+    # 小红书 URL 带 xsec_token（临时鉴权凭证），日志只记 path 不记 query
+    log_url = normalized.split("?", 1)[0] if platform == "xiaohongshu" else normalized
+    logger.info(f"[主页解析] platform={platform}, url={log_url}, limit={limit}, page={page}")
 
     if platform in _YTDLP_PLATFORMS:
         return await _parse_profile_ytdlp(normalized, platform, limit, page)
     if platform == "douyin":
         return await _parse_profile_douyin(normalized, limit, page, cookie)
     if platform == "xiaohongshu":
-        return await _parse_profile_xiaohongshu(normalized, limit)
+        return await _parse_profile_xiaohongshu(normalized, limit, page, cookie)
     return _empty_result("暂不支持该平台的主页批量解析")

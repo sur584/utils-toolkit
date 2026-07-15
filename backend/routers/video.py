@@ -21,6 +21,7 @@ from deps import (
     ParseRequest, BatchParseRequest, ParseProfileRequest,
     _get_client_ip, _add_to_history, ytdlp_semaphore,
     save_douyin_cookie, load_douyin_cookie, clear_douyin_cookie,
+    save_xhs_cookie, load_xhs_cookie, clear_xhs_cookie,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,15 +181,20 @@ async def parse_profile_endpoint(req: ParseProfileRequest, request: Request):
     if not _is_safe_url(url):
         raise HTTPException(status_code=403, detail="不允许访问该地址")
 
-    logger.info(f"[主页解析] 收到请求: {url[:80]}, limit={req.limit}, page={req.page}, cookie_len={len(req.cookie or '')}")
+    # 日志去掉 query：小红书 URL 带 xsec_token（临时鉴权凭证），不入日志
+    log_url = url.split("?", 1)[0]
+    logger.info(f"[主页解析] 收到请求: {log_url[:80]}, limit={req.limit}, page={req.page}, cookie_len={len(req.cookie or '')}")
 
-    # Cookie 按 IP 持久化：带了新 Cookie → 存盘；没带 → 用已存的（翻页/刷新后仍可用）
+    # Cookie 按 IP + 平台持久化：带了新 Cookie → 存盘；没带 → 用已存的（翻页/刷新后仍可用）
+    is_xhs = "xiaohongshu.com" in url
+    _save_cookie = save_xhs_cookie if is_xhs else save_douyin_cookie
+    _load_cookie = load_xhs_cookie if is_xhs else load_douyin_cookie
     cookie = (req.cookie or "").strip()
     if cookie:
-        save_douyin_cookie(ip, cookie)
+        _save_cookie(ip, cookie)
     else:
-        cookie = load_douyin_cookie(ip)
-    logger.info(f"[主页解析] 生效 Cookie: saved_cookie_len={len(cookie)}")
+        cookie = _load_cookie(ip)
+    logger.info(f"[主页解析] 生效 Cookie: platform={'xhs' if is_xhs else 'douyin'}, saved_cookie_len={len(cookie)}")
 
     result = await parse_profile(url, limit=req.limit, page=req.page, cookie=cookie)
 
@@ -602,6 +608,34 @@ async def douyin_cookie_status(request: Request):
 async def clear_douyin_cookie_endpoint(request: Request):
     """清除本 IP 保存的抖音 Cookie"""
     clear_douyin_cookie(_get_client_ip(request))
+    return {"success": True}
+
+
+# ─── 小红书主页登录 Cookie（按 IP 持久化）──────────────────
+
+@router.post("/api/xhs-cookie")
+async def set_xhs_cookie(req: CookieUpdateRequest, request: Request):
+    """保存小红书主页登录 Cookie（按客户端 IP 隔离存储）"""
+    ip = _get_client_ip(request)
+    ck = req.cookie.strip()
+    if not ck:
+        raise HTTPException(status_code=400, detail="cookie 不能为空")
+    save_xhs_cookie(ip, ck)
+    logger.info(f"[小红书Cookie] 已保存 (ip={ip}, len={len(ck)})")
+    return {"success": True, "length": len(ck)}
+
+
+@router.get("/api/xhs-cookie/status")
+async def xhs_cookie_status(request: Request):
+    """查询本 IP 是否已保存小红书 Cookie（不回传明文）"""
+    ck = load_xhs_cookie(_get_client_ip(request))
+    return {"configured": bool(ck), "length": len(ck)}
+
+
+@router.post("/api/xhs-cookie/clear")
+async def clear_xhs_cookie_endpoint(request: Request):
+    """清除本 IP 保存的小红书 Cookie"""
+    clear_xhs_cookie(_get_client_ip(request))
     return {"success": True}
 
 

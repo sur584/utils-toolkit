@@ -210,6 +210,59 @@ async function handleDouyinCookieClear() {
 }
 
 
+// ─── 小红书主页登录 Cookie（按 IP 持久化）────────────
+async function loadXhsCookieStatus() {
+    if (!xhsCookieStatus) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/xhs-cookie/status`);
+        const data = await readJsonResponse(resp, '小红书Cookie状态接口');
+        if (data.configured) {
+            xhsCookieStatus.textContent = `（已保存 · ${data.length} 字符）`;
+            xhsCookieStatus.style.color = 'var(--success, #22c55e)';
+            if (xhsCookieClearBtn) xhsCookieClearBtn.style.display = 'inline-flex';
+        } else {
+            xhsCookieStatus.textContent = '（未保存）';
+            xhsCookieStatus.style.color = 'var(--danger, #ef4444)';
+            if (xhsCookieClearBtn) xhsCookieClearBtn.style.display = 'none';
+        }
+    } catch { /* 忽略 */ }
+}
+
+async function handleXhsCookieSave() {
+    if (!xhsCookie) return;
+    const cookie = xhsCookie.value.trim();
+    if (!cookie) { showToast('请先粘贴小红书登录 Cookie', 'error'); return; }
+    try {
+        const resp = await fetch(`${API_BASE}/api/xhs-cookie`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie }),
+        });
+        const data = await readJsonResponse(resp, '保存小红书Cookie接口');
+        if (data.success) {
+            showToast('Cookie 已保存，本设备后续解析/翻页无需再粘', 'success');
+            xhsCookie.value = '';
+            await loadXhsCookieStatus();
+        } else {
+            showToast('保存失败', 'error');
+        }
+    } catch (err) {
+        showToast(`保存失败: ${err.message}`, 'error');
+    }
+}
+
+async function handleXhsCookieClear() {
+    try {
+        await fetch(`${API_BASE}/api/xhs-cookie/clear`, { method: 'POST' });
+        if (xhsCookie) xhsCookie.value = '';
+        showToast('已清除本设备保存的 Cookie', 'success');
+        await loadXhsCookieStatus();
+    } catch (err) {
+        showToast(`清除失败: ${err.message}`, 'error');
+    }
+}
+
+
 // ─── DOM ───────────────────────────────────────────
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -267,6 +320,10 @@ const profileCookie = $('#profileCookie');
 const dyCookieSaveBtn = $('#dyCookieSaveBtn');
 const dyCookieClearBtn = $('#dyCookieClearBtn');
 const dyCookieStatus = $('#dyCookieStatus');
+const xhsCookie = $('#xhsCookie');
+const xhsCookieSaveBtn = $('#xhsCookieSaveBtn');
+const xhsCookieClearBtn = $('#xhsCookieClearBtn');
+const xhsCookieStatus = $('#xhsCookieStatus');
 const profilePasteBtn = $('#profilePasteBtn');
 const profileParseBtn = $('#profileParseBtn');
 const profileStatus = $('#profileStatus');
@@ -331,6 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
     loadProxyStatus();
     loadDouyinCookieStatus();
+    loadXhsCookieStatus();
     // 页面加载后自动检测代理（非阻塞，不要等待完成）
     autoDetectProxy();
 });
@@ -477,6 +535,14 @@ function initEventListeners() {
     }
     if (dyCookieClearBtn) {
         dyCookieClearBtn.addEventListener('click', handleDouyinCookieClear);
+    }
+
+    // 小红书主页 Cookie
+    if (xhsCookieSaveBtn) {
+        xhsCookieSaveBtn.addEventListener('click', handleXhsCookieSave);
+    }
+    if (xhsCookieClearBtn) {
+        xhsCookieClearBtn.addEventListener('click', handleXhsCookieClear);
     }
 }
 
@@ -1396,7 +1462,10 @@ async function handleProfileParse(page = 1, fromInput = false) {
     }
 
     const limit = parseInt(profileLimit.value, 10) || 20;
-    const cookie = profileCookie ? profileCookie.value.trim() : '';
+    // 按平台取对应的 Cookie 输入框（小红书 / 抖音各一个）
+    const isXhs = /xiaohongshu\.com/.test(url);
+    const cookieEl = isXhs ? xhsCookie : profileCookie;
+    const cookie = cookieEl ? cookieEl.value.trim() : '';
     const started = Date.now();
     showStatus(profileStatus, `🔍 正在解析主页视频列表（第 ${page} 页，可能需要 10~30 秒）...`, 'info');
 

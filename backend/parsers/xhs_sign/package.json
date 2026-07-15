@@ -1,0 +1,9 @@
+{
+  "name": "xhs-sign",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Xiaohongshu x-s signature generator (vendored from cv-cat/Spider_XHS)",
+  "dependencies": {
+    "crypto-js": "^4.2.0"
+  }
+}

@@ -228,7 +228,7 @@
                         id="profileInput"
                         class="url-input"
                         style="min-height:48px;padding:12px"
-                        placeholder="粘贴主页链接，例如：&#10;https://www.tiktok.com/@neleus0102（TikTok / YouTube 稳定）&#10;https://www.youtube.com/@mkbhd&#10;抖音需粘贴登录 Cookie（见下方），支持翻页；小红书仅首屏"
+                        placeholder="粘贴主页链接，例如：&#10;https://www.tiktok.com/@neleus0102（TikTok / YouTube 稳定）&#10;https://www.youtube.com/@mkbhd&#10;抖音 / 小红书需粘贴登录 Cookie（见下方），均支持翻页；小红书请复制带 xsec_token 的完整主页链接"
                     >
                     <div class="input-actions">
                         <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text-secondary)">
@@ -273,6 +273,26 @@
                         抖音主页接口有「强制登录」反爬，匿名请求拿不到数据。保存后本设备无需再次粘贴（按 IP 存储，其他设备不共用）。Cookie 仅本地转发给抖音，不作外发。失效后重新粘贴即可。
                     </p>
                 </details>
+
+                <!-- 小红书主页需登录 Cookie -->
+                <details style="margin-top:10px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--bg-card)">
+                    <summary style="cursor:pointer;font-size:13px;color:var(--text-secondary)">🔑 小红书主页需登录 Cookie（点击展开填写）</summary>
+                    <textarea
+                        id="xhsCookie"
+                        rows="3"
+                        style="width:100%;margin-top:8px;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:12px;font-family:monospace;resize:vertical"
+                        placeholder="从浏览器登录小红书后，F12 → Network → 任意 xiaohongshu.com 请求 → 复制 Cookie 请求头整段粘贴到此（需含 a1、web_session）"
+                    ></textarea>
+                    <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+                        <span id="xhsCookieStatus" style="font-size:12px;color:var(--danger)">（未保存）</span>
+                        <button class="btn btn-primary btn-sm" id="xhsCookieSaveBtn">保存 Cookie</button>
+                        <button class="btn btn-ghost btn-sm" id="xhsCookieClearBtn" style="display:none">清除</button>
+                    </div>
+                    <p style="margin:6px 0 0;font-size:12px;color:var(--text-secondary)">
+                        小红书主页接口需登录态与签名（依赖 Cookie 里的 a1），匿名拿不到数据。同时请从浏览器地址栏复制「带 xsec_token 的完整主页链接」粘贴到上方输入框。保存后本设备无需再次粘贴（按 IP 存储）。Cookie 仅本地转发，不作外发。
+                    </p>
+                </details>
+
 
                 <div class="status-bar" id="profileStatus" style="display:none">
                     <span class="status-text"></span>
@@ -342,6 +362,6 @@
         <p>小小工具箱 &mdash; 视频解析下载 v2.0 &mdash; 支持 10+ 主流平台</p>
     </footer>
 
-    <script src="./js/app.js?v=20260715"></script>
+    <script src="./js/app.js?v=20260715b"></script>
 </body>
 </html>

@@ -135,3 +135,30 @@ def clear_douyin_cookie(ip: str) -> None:
     f = _douyin_cookie_file(ip)
     if f.exists():
         f.unlink()
+
+# ─── 小红书登录 Cookie（按 IP 持久化，与抖音同机制）───────────
+# 小红书主页解析需登录 Cookie（签名需其中的 a1，接口需登录态）。
+def _xhs_cookie_file(ip: str) -> Path:
+    HISTORY_DIR.mkdir(exist_ok=True)
+    safe_ip = ip.replace(".", "_").replace(":", "_")
+    return HISTORY_DIR / f"xhs_cookie_{safe_ip}.json"
+
+def load_xhs_cookie(ip: str) -> str:
+    f = _xhs_cookie_file(ip)
+    if f.exists():
+        try:
+            return json.loads(f.read_text(encoding="utf-8")).get("cookie", "")
+        except Exception:
+            return ""
+    return ""
+
+def save_xhs_cookie(ip: str, cookie: str) -> None:
+    f = _xhs_cookie_file(ip)
+    f.write_text(json.dumps(
+        {"cookie": cookie, "update_time": time.strftime("%Y-%m-%d %H:%M:%S")},
+        ensure_ascii=False), encoding="utf-8")
+
+def clear_xhs_cookie(ip: str) -> None:
+    f = _xhs_cookie_file(ip)
+    if f.exists():
+        f.unlink()

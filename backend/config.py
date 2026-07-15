@@ -128,6 +128,8 @@ logging.basicConfig(
         logging.FileHandler(BASE_DIR / "app.log", encoding="utf-8"),
     ],
 )
+# httpx 默认 INFO 会打印完整请求 URL（含 xsec_token 等临时鉴权 query），降到 WARNING 防泄露
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ─── 视频号解析 cookie ─────────────────────────────────
 YUANBAO_COOKIE = os.environ.get("YUANBAO_COOKIE", "")
