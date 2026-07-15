@@ -113,6 +113,69 @@ def check_and_install_deps():
                 print(f'         如遇网络问题，可尝试配置代理或使用国内镜像源')
 
 
+def _has_nvidia_gpu():
+    """检测本机是否有可用的 NVIDIA 显卡（依据 nvidia-smi 能否成功运行）"""
+    import shutil
+    if not shutil.which('nvidia-smi'):
+        return False
+    try:
+        subprocess.run(
+            ['nvidia-smi'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=8, check=True,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def check_gpu_acceleration():
+    """有 NVIDIA 显卡但缺 CUDA 运行库时自动安装，让 Whisper 走 GPU。
+
+    faster-whisper(ctranslate2 4.x) 需要 CUDA 12 的 cuBLAS + cuDNN 9。
+    这两个库不放进 requirements.txt——无显卡的机器装了也没用。改为启动时
+    按硬件条件动态安装：有显卡才装，没显卡跑 CPU。复制项目到新电脑后
+    双击启动即自动适配。
+    """
+    try:
+        import faster_whisper  # noqa: F401
+    except ImportError:
+        return  # 未装转写功能，无需 GPU 库
+
+    if not _has_nvidia_gpu():
+        print('  [i] 未检测到 NVIDIA 显卡，语音识别将使用 CPU')
+        return
+
+    try:
+        import nvidia.cublas  # noqa: F401
+        import nvidia.cudnn   # noqa: F401
+        print('  [OK] NVIDIA 显卡 + CUDA 加速库已就绪')
+        return
+    except ImportError:
+        pass
+
+    gpu_pkgs = ['nvidia-cublas-cu12', 'nvidia-cudnn-cu12>=9.0,<10']
+    print('  [...] 检测到 NVIDIA 显卡，正在安装 CUDA 加速库（约数百 MB，首次较慢，请耐心等待）...')
+    for use_no_proxy in (False, True):
+        cmd = [sys.executable, '-m', 'pip', 'install']
+        env = os.environ.copy()
+        if use_no_proxy:
+            cmd.append('--no-proxy')
+            for k in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+                env.pop(k, None)
+        try:
+            subprocess.check_call(
+                cmd + gpu_pkgs,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+            )
+            print('  [OK] CUDA 加速库安装完成，语音识别将使用 GPU')
+            return
+        except Exception:
+            continue
+    print('  [WARN] CUDA 加速库安装失败，语音识别将回退到 CPU（较慢）')
+    print(f'         可手动执行: {sys.executable} -m pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9.0,<10"')
+
+
 def get_lan_ip():
     """获取本机局域网 IP"""
     import socket
@@ -186,6 +249,7 @@ def main():
 
     if args.check_deps_only:
         check_and_install_deps()
+        check_gpu_acceleration()
         sys.exit(0)
 
     port = find_free_port(args.port)
@@ -198,6 +262,7 @@ def main():
 
     print('[1/4] 检查依赖...')
     check_and_install_deps()
+    check_gpu_acceleration()
     print()
 
     print('[2/4] 检查前端构建...')

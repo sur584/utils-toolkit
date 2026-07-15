@@ -43,6 +43,7 @@
         transcriptText: $('#transcriptText'),
         copyBtn: $('#copyBtn'),
         downloadBtn: $('#downloadBtn'),
+        downloadSrtBtn: $('#downloadSrtBtn'),
         retryBtn: $('#retryBtn'),
         errorArea: $('#errorArea'),
         errorMessage: $('#errorMessage'),
@@ -70,6 +71,7 @@
     var FETCH_TIMEOUT = 15000;
     var selectedFile = null;
     var currentMode = 'link';
+    var lastResult = null;
 
     // ─── URL Extraction ─────────────────────
     function extractUrl(text) {
@@ -269,6 +271,57 @@
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         showToast('文件已下载', 'success');
+    }
+
+    function downloadAsSrt() {
+        // 优先用后端返回的 srt（含真实时间轴）；旧缓存/旧后端无此字段时，前端用文案+时长兜底合成
+        var srt = (lastResult && lastResult.srt) ||
+            buildSrtFromText(
+                (lastResult && lastResult.transcript) || elements.transcriptText.textContent || '',
+                (lastResult && lastResult.duration) || 0
+            );
+        if (!srt) { showToast('没有可下载的内容', 'error'); return; }
+        var title = elements.videoTitle.textContent || 'transcript';
+        var safeName = title.replace(/[\\/:*?"<>|]/g, '_').substring(0, 80);
+        var blob = new Blob([srt], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = safeName + '.srt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('字幕已下载', 'success');
+    }
+
+    // 前端兜底：按句末标点切分，按字符占比在 [0, duration] 分配时间轴，合成近似 SRT
+    function buildSrtFromText(text, duration) {
+        text = (text || '').trim();
+        if (!text) return '';
+        var chunks = text.split(/(?<=[。！？；.!?;\n])/).map(function (c) { return c.trim(); }).filter(Boolean);
+        if (!chunks.length) chunks = [text];
+        var totalChars = chunks.reduce(function (n, c) { return n + c.length; }, 0);
+        if (!duration || duration <= 0) duration = Math.max(totalChars / 5, 1);
+        var cursor = 0, out = [];
+        for (var i = 0; i < chunks.length; i++) {
+            var span = totalChars ? duration * (chunks[i].length / totalChars) : duration;
+            var start = cursor;
+            var end = i === chunks.length - 1 ? duration : Math.min(cursor + span, duration);
+            out.push((i + 1) + '\n' + fmtSrtTime(start) + ' --> ' + fmtSrtTime(end) + '\n' + chunks[i]);
+            cursor = end;
+        }
+        return out.join('\n\n');
+    }
+
+    function fmtSrtTime(sec) {
+        if (sec < 0) sec = 0;
+        var ms = Math.round(sec * 1000);
+        var h = Math.floor(ms / 3600000); ms -= h * 3600000;
+        var m = Math.floor(ms / 60000); ms -= m * 60000;
+        var s = Math.floor(ms / 1000); ms -= s * 1000;
+        var p = function (n, w) { return String(n).padStart(w, '0'); };
+        return p(h, 2) + ':' + p(m, 2) + ':' + p(s, 2) + ',' + p(ms, 3);
     }
 
     // ─── Format Transcript ──────────────────
@@ -514,6 +567,7 @@
 
     // ─── Render Result ──────────────────────
     function renderResult(data) {
+        lastResult = data;
         elements.videoTitle.textContent = data.title || '-';
         elements.videoAuthor.textContent = data.author || '-';
         elements.videoPlatform.textContent = data.platform || '-';
@@ -605,6 +659,7 @@
         elements.submitBtn.addEventListener('click', submitUrl);
         elements.copyBtn.addEventListener('click', copyToClipboard);
         elements.downloadBtn.addEventListener('click', downloadAsTxt);
+        if (elements.downloadSrtBtn) elements.downloadSrtBtn.addEventListener('click', downloadAsSrt);
         elements.retryBtn.addEventListener('click', handleRetry);
         elements.retryFromErrorBtn.addEventListener('click', handleRetry);
 

@@ -98,6 +98,7 @@ async def _extract_douyin(url: str, method: str, language: str, settings, progre
 
     # 抖音通常没有平台字幕，直接进入 ASR 流程
     transcript = None
+    segments = None
     method_used = "subtitle"
 
     # 尝试字幕（抖音一般没有，但保留兼容性）
@@ -123,18 +124,20 @@ async def _extract_douyin(url: str, method: str, language: str, settings, progre
                 raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过当前引擎 {_limit // 1024 // 1024}MB 限制")
 
             await progress("asr", 70, "正在进行语音识别...")
-            transcript = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
+            transcript, segments = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
             method_used = "asr"
 
     if not transcript:
         raise RuntimeError("未能提取到文案内容")
 
     transcript = _to_simplified(transcript)
+    segments = _finalize_segments(segments, transcript, info.get("duration", 0))
     await progress("done", 100, "提取完成")
 
     return {
         "method_used": method_used,
         "transcript": transcript,
+        "srt": segments_to_srt(segments),
         "title": title,
         "platform": "douyin",
         "author": author,
@@ -173,6 +176,7 @@ async def _extract_wechat(url: str, method: str, language: str, settings, progre
         raise RuntimeError("视频号暂无平台字幕，请使用自动或语音识别模式")
 
     transcript = None
+    segments = None
     method_used = "asr"
 
     if method in ("auto", "asr_only"):
@@ -196,17 +200,19 @@ async def _extract_wechat(url: str, method: str, language: str, settings, progre
                 raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过当前引擎 {_limit // 1024 // 1024}MB 限制")
 
             await progress("asr", 70, "正在进行语音识别...")
-            transcript = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
+            transcript, segments = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
 
     if not transcript:
         raise RuntimeError("未能提取到文案内容")
 
     transcript = _to_simplified(transcript)
+    segments = _finalize_segments(segments, transcript, data.get("duration", 0))
     await progress("done", 100, "提取完成")
 
     return {
         "method_used": method_used,
         "transcript": transcript,
+        "srt": segments_to_srt(segments),
         "title": title,
         "platform": "wechat_channels",
         "author": author,
@@ -260,19 +266,43 @@ async def _extract_audio(video_path: str, output_prefix: str) -> str:
     return video_path
 
 
+def _finalize_segments(segments: Optional[list[dict]], transcript: str, duration: float) -> list[dict]:
+    """统一收尾：真实 segments 转简体；无真实 segments 时按文本+时长合成近似时间轴。"""
+    if segments:
+        return [{**s, "text": _to_simplified(s["text"])} for s in segments]
+    return synthesize_segments(transcript, duration)
+
+
+async def _transcribe_client(client, audio_bytes, language):
+    """调用单个 ASR 客户端，优先取带时间戳的 segments。
+
+    Returns: (text, segments | None)。仅本地 Whisper 提供 transcribe_segments，
+    其余（MiMo/云端 chat-completion）只返回纯文本，segments 为 None。
+    """
+    if hasattr(client, "transcribe_segments"):
+        segments = await client.transcribe_segments(audio_bytes, audio_format="mp3", language=language)
+        text = " ".join(s["text"] for s in segments if s["text"])
+        return text, segments
+    text = await client.transcribe(audio_bytes, audio_format="mp3", language=language)
+    return text, None
+
+
 async def _transcribe_with_fallback(audio_bytes, language, settings, progress_cb):
-    """ASR 识别，失败时自动回退到 MiMo。"""
+    """ASR 识别，失败时自动回退到 MiMo。
+
+    Returns: (text, segments | None)。
+    """
     from .asr import get_asr_client
     client = get_asr_client(settings.asr_provider)
     try:
-        return await client.transcribe(audio_bytes, audio_format="mp3", language=language)
+        return await _transcribe_client(client, audio_bytes, language)
     except RuntimeError as e:
         if settings.asr_provider != "mimo":
             logger.warning(f"ASR {settings.asr_provider} 失败: {e}，回退到 MiMo")
             if progress_cb:
                 await progress_cb("asr", 72, "主引擎失败，切换备选引擎...")
             fallback_client = get_asr_client("mimo")
-            return await fallback_client.transcribe(audio_bytes, audio_format="mp3", language=language)
+            return await _transcribe_client(fallback_client, audio_bytes, language)
         raise
 
 
@@ -359,7 +389,7 @@ async def extract_transcript_from_file(
             )
 
         await progress("asr", 70, "正在进行语音识别...")
-        transcript = await _transcribe_with_fallback(
+        transcript, segments = await _transcribe_with_fallback(
             audio_bytes, language, settings, progress_callback
         )
 
@@ -367,11 +397,13 @@ async def extract_transcript_from_file(
         raise RuntimeError("未能提取到文案内容")
 
     transcript = _to_simplified(transcript)
+    segments = _finalize_segments(segments, transcript, 0)
     await progress("done", 100, "提取完成")
 
     return {
         "method_used": "asr",
         "transcript": transcript,
+        "srt": segments_to_srt(segments),
         "title": title,
         "platform": "local",
         "author": "本地文件",
@@ -407,6 +439,7 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
 
     # Step 3: 尝试字幕提取
     transcript = None
+    segments = None
     method_used = "subtitle"
 
     if method in ("auto", "subtitle_only"):
@@ -418,13 +451,11 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
                     await progress("subtitles", 40, "正在解析字幕文件...")
                     content = sub_file.read_text(encoding="utf-8-sig")
                     if sub_file.suffix == ".srt":
-                        lines = parse_srt(content)
+                        segments = parse_srt_segments(content)
                     elif sub_file.suffix == ".vtt":
-                        lines = parse_vtt(content)
-                    else:
-                        lines = ""
-                    if lines:
-                        transcript = clean_subtitle_text(lines.split("\n"))
+                        segments = parse_vtt_segments(content)
+                    if segments:
+                        transcript = segments_to_text(segments)
             except Exception as e:
                 logger.warning(f"字幕提取失败: {e}")
 
@@ -441,18 +472,20 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
                 raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过当前引擎 {_limit // 1024 // 1024}MB 限制")
 
             await progress("asr", 70, "正在进行语音识别...")
-            transcript = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
+            transcript, segments = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
             method_used = "asr"
 
     if not transcript:
         raise RuntimeError("未能提取到文案内容")
 
     transcript = _to_simplified(transcript)
+    segments = _finalize_segments(segments, transcript, info.get("duration", 0))
     await progress("done", 100, "提取完成")
 
     return {
         "method_used": method_used,
         "transcript": transcript,
+        "srt": segments_to_srt(segments),
         "title": title,
         "platform": platform or "unknown",
         "author": author,
@@ -463,47 +496,153 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
     }
 
 
-def parse_srt(content: str) -> str:
-    """Parse SRT to plain text lines."""
+def _srt_time_to_seconds(ts: str) -> float:
+    """将 SRT/VTT 时间戳 (HH:MM:SS,mmm 或 HH:MM:SS.mmm) 转为秒。"""
+    ts = ts.strip().replace(",", ".")
+    parts = ts.split(":")
+    try:
+        if len(parts) == 3:
+            h, m, s = parts
+        elif len(parts) == 2:
+            h, m, s = "0", parts[0], parts[1]
+        else:
+            return 0.0
+        return int(h) * 3600 + int(m) * 60 + float(s)
+    except ValueError:
+        return 0.0
+
+
+def _clean_line(line: str) -> str:
+    """去除字幕行内的标签、HTML 实体并规整空白。"""
+    line = re.sub(r"<[^>]+>", "", line)
+    line = html.unescape(line)
+    return re.sub(r"\s+", " ", line).strip()
+
+
+_TIME_RANGE_RE = re.compile(
+    r"(\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}|\d{1,2}:\d{2}[.,]\d{1,3})\s*-->\s*"
+    r"(\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}|\d{1,2}:\d{2}[.,]\d{1,3})"
+)
+
+
+def parse_srt_segments(content: str) -> list[dict]:
+    """解析 SRT，保留时间轴，返回 [{start, end, text}]。"""
     content = content.lstrip("﻿")
-    lines = []
+    segments = []
     for block in re.split(r"\n\s*\n", content.strip()):
         block_lines = block.strip().split("\n")
-        if len(block_lines) >= 3:
-            text = " ".join(block_lines[2:])
-            lines.append(text)
-    return "\n".join(lines)
+        if len(block_lines) < 2:
+            continue
+        m = None
+        text_start = 0
+        for idx, bl in enumerate(block_lines[:2]):
+            m = _TIME_RANGE_RE.search(bl)
+            if m:
+                text_start = idx + 1
+                break
+        if not m:
+            continue
+        text = _clean_line(" ".join(block_lines[text_start:]))
+        if not text:
+            continue
+        if segments and segments[-1]["text"] == text:
+            continue
+        segments.append({
+            "start": _srt_time_to_seconds(m.group(1)),
+            "end": _srt_time_to_seconds(m.group(2)),
+            "text": text,
+        })
+    return segments
 
 
-def parse_vtt(content: str) -> str:
-    """Parse VTT to plain text lines."""
+def parse_vtt_segments(content: str) -> list[dict]:
+    """解析 WebVTT，保留时间轴，返回 [{start, end, text}]。"""
     content = content.lstrip("﻿")
     content = re.sub(r"^WEBVTT.*?\n\n", "", content, flags=re.DOTALL)
-    lines = []
+    segments = []
     for block in re.split(r"\n\s*\n", content.strip()):
         block_lines = block.strip().split("\n")
+        m = None
         text_lines = []
-        for line in block_lines:
-            if re.match(r"^\d+$", line):
+        for bl in block_lines:
+            if m is None:
+                # 时间轴之前的行（cue 序号 / cue 标识符）一律忽略
+                m = _TIME_RANGE_RE.search(bl)
                 continue
-            if re.match(r"[\d:.,\-> ]+$", line):
-                continue
-            text_lines.append(line)
-        if text_lines:
-            lines.append(" ".join(text_lines))
-    return "\n".join(lines)
+            text_lines.append(bl)
+        if not m:
+            continue
+        text = _clean_line(" ".join(text_lines))
+        if not text:
+            continue
+        if segments and segments[-1]["text"] == text:
+            continue
+        segments.append({
+            "start": _srt_time_to_seconds(m.group(1)),
+            "end": _srt_time_to_seconds(m.group(2)),
+            "text": text,
+        })
+    return segments
 
 
-def clean_subtitle_text(lines: list[str]) -> str:
-    """Clean and deduplicate subtitle lines."""
-    cleaned = []
-    for line in lines:
-        line = re.sub(r"<[^>]+>", "", line)
-        line = html.unescape(line)
-        line = re.sub(r"\s+", " ", line).strip()
-        if not line:
+def segments_to_text(segments: list[dict]) -> str:
+    """把 segments 拼成纯文本（空格分隔）。"""
+    return " ".join(s["text"] for s in segments if s.get("text"))
+
+
+# 中文口语约 5 字/秒，用于无时长信息时估算时间轴
+_CHARS_PER_SECOND = 5.0
+
+
+def synthesize_segments(text: str, duration: float) -> list[dict]:
+    """无真实时间戳时，按标点切句、按字符占比在 [0, duration] 上分配，合成近似时间轴。"""
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    # 按句末标点切分，保留标点
+    pieces = re.split(r"(?<=[。！？；.!?;\n])", text)
+    chunks = [p.strip() for p in pieces if p.strip()]
+    if not chunks:
+        chunks = [text]
+
+    total_chars = sum(len(c) for c in chunks)
+    if not duration or duration <= 0:
+        duration = max(total_chars / _CHARS_PER_SECOND, 1.0)
+
+    segments = []
+    cursor = 0.0
+    for chunk in chunks:
+        span = duration * (len(chunk) / total_chars) if total_chars else duration
+        start = cursor
+        end = min(cursor + span, duration)
+        segments.append({"start": start, "end": end, "text": chunk})
+        cursor = end
+    if segments:
+        segments[-1]["end"] = duration
+    return segments
+
+
+def _format_srt_time(seconds: float) -> str:
+    """秒 -> SRT 时间戳 HH:MM:SS,mmm。"""
+    if seconds < 0:
+        seconds = 0.0
+    ms = int(round(seconds * 1000))
+    h, ms = divmod(ms, 3600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def segments_to_srt(segments: list[dict]) -> str:
+    """把 segments 格式化为标准 SRT 文本。"""
+    blocks = []
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
             continue
-        if cleaned and line == cleaned[-1]:
-            continue
-        cleaned.append(line)
-    return " ".join(cleaned)
+        idx = len(blocks) + 1
+        blocks.append(
+            f"{idx}\n{_format_srt_time(seg['start'])} --> {_format_srt_time(seg['end'])}\n{text}"
+        )
+    return "\n\n".join(blocks)

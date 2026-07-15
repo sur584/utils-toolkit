@@ -9,8 +9,8 @@ __pycache__/
 # Downloads
 backend/downloads/
 
-# Transcript cache (generated during ASR processing)
-backend/transcript/cache/
+# Transcript cache: ignore generated DB, keep source code (store.py, __init__.py)
+backend/transcript/cache/*.db
 *.mp4
 *.part
 
@@ -21,8 +21,8 @@ python/
 models/
 models/hub/                   # HuggingFace / Whisper 模型缓存
 
-# Cache directory (auto-generated)
-cache/
+# Cache directory (auto-generated, root only)
+/cache/
 
 # History data (personal video history, do not commit)
 backend/history_data/

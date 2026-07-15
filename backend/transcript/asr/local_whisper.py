@@ -125,15 +125,20 @@ class LocalWhisperASR:
         audio_format: str = "mp3",
         language: str = "zh",
     ) -> str:
-        """Transcribe audio bytes to text.
+        """Transcribe audio bytes to plain text (segments joined by spaces)."""
+        segments = await self.transcribe_segments(audio_bytes, audio_format, language)
+        return " ".join(s["text"] for s in segments if s["text"])
 
-        Args:
-            audio_bytes: Raw audio data.
-            audio_format: Audio file format (e.g. "mp3", "wav", "m4a").
-            language: Language code (default "zh" for Chinese).
+    async def transcribe_segments(
+        self,
+        audio_bytes: bytes,
+        audio_format: str = "mp3",
+        language: str = "zh",
+    ) -> list[dict]:
+        """Transcribe audio bytes to timestamped segments.
 
         Returns:
-            Transcribed text with all segments joined by spaces.
+            A list of {"start": float, "end": float, "text": str} in seconds.
         """
         if self._model is None:
             self._load_model()
@@ -158,28 +163,34 @@ class LocalWhisperASR:
                         min_silence_duration_ms=500,
                     ),
                 )
-                texts = []
+                result = []
                 for segment in segments:
-                    texts.append(segment.text.strip())
-                return " ".join(texts), info
+                    text = segment.text.strip()
+                    if text:
+                        result.append({
+                            "start": float(segment.start),
+                            "end": float(segment.end),
+                            "text": text,
+                        })
+                return result, info
 
             try:
-                text, info = await asyncio.to_thread(_do_transcribe)
+                segments, info = await asyncio.to_thread(_do_transcribe)
             except Exception as e:
                 # CUDA inference failed (e.g. missing cublas64_12.dll) — retry on CPU
                 if self._loaded_device == "cuda" and "cublas" in str(e).lower():
                     logger.warning("CUDA inference failed (%s), reloading model on CPU...", e)
                     self._load_model(force_cpu=True)
-                    text, info = await asyncio.to_thread(_do_transcribe)
+                    segments, info = await asyncio.to_thread(_do_transcribe)
                 else:
                     raise
 
             logger.info(
-                "Transcription completed: %d characters, detected language=%s",
-                len(text),
+                "Transcription completed: %d segments, detected language=%s",
+                len(segments),
                 getattr(info, "language", "unknown"),
             )
-            return text
+            return segments
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 try:
