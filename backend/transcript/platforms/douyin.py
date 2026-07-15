@@ -11,6 +11,12 @@ from ._utils import _headers, _follow_redirects, _fetch
 
 logger = logging.getLogger(__name__)
 
+# 复用主解析器的官方 detail API（a_bogus 签名 + ttwid，匿名取数），避免重复实现签名逻辑
+try:
+    from parsers.douyin import _fetch_aweme_detail as _dy_fetch_detail
+except Exception:  # pragma: no cover - 导入失败时降级为仅用分享页兜底
+    _dy_fetch_detail = None
+
 
 async def resolve_url(url: str) -> str:
     """Resolve Douyin short links to canonical URL."""
@@ -45,46 +51,52 @@ async def fetch_video_info(url: str) -> Dict[str, Any]:
     if not video_id:
         raise ValueError("无法提取视频 ID")
 
-    # 抖音分享页：iesdouyin.com 旧域名已失效（返回空壳页、不再内嵌 item_list），
-    # 优先改用 www.douyin.com 分享页；能拿到 item_list 就用，否则回退旧域名兜底。
-    page_urls = [
-        f"https://www.douyin.com/share/video/{video_id}/",
-        f"https://www.iesdouyin.com/share/video/{video_id}/",
-    ]
-    html = None
-    for page_url in page_urls:
-        html = await _fetch(page_url, headers=_headers(mobile=True), use_proxy=False)
-        if not html:
-            html = await _fetch(page_url, headers=_headers(mobile=True))
-        if html and '"item_list":[' in html:
-            break
-    if not html:
-        raise RuntimeError("获取抖音页面失败")
+    # 抖音已下线分享页内嵌的 item_list JSON（share 页现返回空壳）。优先走官方 detail API
+    # （复用 parsers.douyin 的 a_bogus 签名 + ttwid，匿名即可），失败再回退旧分享页兜底。
+    item = None
+    if _dy_fetch_detail is not None:
+        try:
+            item = await _dy_fetch_detail(video_id)
+        except Exception as e:
+            logger.warning(f"[抖音转录] detail API 异常: {type(e).__name__}: {e}")
+            item = None
 
-    # 解析嵌入的 JSON
-    marker = '"item_list":['
-    start = html.find(marker)
-    if start < 0:
-        raise RuntimeError("页面解析失败，链接可能已失效")
-
-    bracket_start = html.index("[", start)
-    depth = 0
-    end = bracket_start
-    for i in range(bracket_start, len(html)):
-        if html[i] == "[":
-            depth += 1
-        elif html[i] == "]":
-            depth -= 1
-            if depth == 0:
-                end = i + 1
+    if item is None:
+        page_urls = [
+            f"https://www.douyin.com/share/video/{video_id}/",
+            f"https://www.iesdouyin.com/share/video/{video_id}/",
+        ]
+        html = None
+        for page_url in page_urls:
+            html = await _fetch(page_url, headers=_headers(mobile=True), use_proxy=False)
+            if not html:
+                html = await _fetch(page_url, headers=_headers(mobile=True))
+            if html and '"item_list":[' in html:
                 break
+        if not html or '"item_list":[' not in html:
+            raise RuntimeError("解析失败：抖音接口未返回数据（可稍后重试，或 a_bogus 签名/风控问题）")
 
-    try:
-        items = json.loads(html[bracket_start:end])
-    except Exception as e:
-        raise RuntimeError(f"JSON 解析失败: {e}")
+        marker = '"item_list":['
+        start = html.find(marker)
+        bracket_start = html.index("[", start)
+        depth = 0
+        end = bracket_start
+        for i in range(bracket_start, len(html)):
+            if html[i] == "[":
+                depth += 1
+            elif html[i] == "]":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        try:
+            items = json.loads(html[bracket_start:end])
+        except Exception as e:
+            raise RuntimeError(f"JSON 解析失败: {e}")
+        item = items[0] if items else None
+        if item is None:
+            raise RuntimeError("解析失败：抖音接口未返回数据")
 
-    item = items[0]
     author = item.get("author", {})
     video = item.get("video", {})
 

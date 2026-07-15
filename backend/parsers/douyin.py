@@ -105,6 +105,105 @@ def _get_douyin_image_url(img: dict) -> str:
     return unique_candidates[0][1]
 
 
+# 单视频详情官方 Web API（与主页列表同一套签名/ttwid/msToken 机制）
+_DETAIL_API = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
+
+
+async def _fetch_aweme_detail(video_id: str, cookie: str = "") -> Optional[dict]:
+    """走抖音官方 Web API 拉取单视频详情。
+
+    抖音已下线分享页内嵌的 item_list JSON（share 页现返回 ~2.5KB 空壳），
+    单视频改用 aweme/v1/web/aweme/detail/：a_bogus 签名 + ttwid（匿名即可取数，
+    无需登录 Cookie）。返回的 aweme_detail 与旧 item_list[0] 同构。
+    拿不到返回 None（由上层回退 share 页兜底）。
+    """
+    ms_token = _generate_ms_token()
+
+    async def _once(force_refresh: bool) -> Optional[httpx.Response]:
+        ttwid = await _get_ttwid(force_refresh=force_refresh)
+        params = {
+            "device_platform": "webapp",
+            "aid": "6383",
+            "channel": "channel_pc_web",
+            "aweme_id": video_id,
+            "cookie_enabled": "true",
+            "platform": "PC",
+            "downlink": "10",
+            "effective_type": "4g",
+            "round_trip_time": "50",
+            "msToken": ms_token,
+        }
+        query = urlencode(params)
+        params["a_bogus"] = get_a_bogus(query, DESKTOP_UA)
+        cookie_header = _merge_cookie(cookie, ttwid, ms_token)
+        headers = {
+            "User-Agent": DESKTOP_UA,
+            "Referer": f"https://www.douyin.com/video/{video_id}",
+            "Accept": "application/json, text/plain, */*",
+            "Cookie": cookie_header,
+        }
+        # trust_env=False：抖音国内直连，禁走系统代理（否则易被判异常流量 / 502）
+        async with httpx.AsyncClient(timeout=15.0, verify=False, trust_env=False) as c:
+            return await c.get(_DETAIL_API, params=params, headers=headers)
+
+    try:
+        r = await _once(force_refresh=False)
+        if r is None or not r.content or len(r.content) < 50:
+            logger.warning("[抖音] detail API 首次返回空，刷新 ttwid 重试")
+            r = await _once(force_refresh=True)
+        if r is None or not r.content or len(r.content) < 50:
+            logger.warning("[抖音] detail API 返回空数据（a_bogus 签名或 ttwid 可能失效）")
+            return None
+        data = r.json()
+        status_code = data.get("status_code", 0)
+        if status_code != 0:
+            logger.warning(f"[抖音] detail API 风控拦截 (status_code={status_code})")
+            return None
+        detail = data.get("aweme_detail")
+        return detail or None
+    except Exception as e:
+        logger.warning(f"[抖音] detail API 异常: {type(e).__name__}: {e}")
+        return None
+
+
+async def _fetch_item_from_share_page(video_id: str) -> Optional[dict]:
+    """旧分享页兜底：优先 www.douyin.com，回退 iesdouyin.com，抽取内嵌 item_list[0]。
+    抖音多数情况下已下线该 JSON，仅作 API 失败后的兜底，返回 None 表示取不到。
+    """
+    page_urls = [
+        f"https://www.douyin.com/share/video/{video_id}/",
+        f"https://www.iesdouyin.com/share/video/{video_id}/",
+    ]
+    html = None
+    for page_url in page_urls:
+        html = await _fetch(page_url, headers=_headers(mobile=True), use_proxy=False)
+        if not html:
+            html = await _fetch(page_url, headers=_headers(mobile=True))
+        if html and '"item_list":[' in html:
+            break
+    if not html or '"item_list":[' not in html:
+        return None
+
+    marker = '"item_list":['
+    start = html.find(marker)
+    bracket_start = html.index("[", start)
+    depth = 0
+    end = bracket_start
+    for i in range(bracket_start, len(html)):
+        if html[i] == "[":
+            depth += 1
+        elif html[i] == "]":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    try:
+        items = json.loads(html[bracket_start:end])
+        return items[0] if items else None
+    except Exception:
+        return None
+
+
 async def parse(url: str) -> Dict[str, Any]:
     url = url.rstrip("/")
     parsed = urlparse(url)
@@ -128,45 +227,15 @@ async def parse(url: str) -> Dict[str, Any]:
     if not video_id:
         return _empty_result("无法提取视频 ID")
 
-    # 抖音分享页：iesdouyin.com 旧域名已失效（返回空壳页、不再内嵌 item_list），
-    # 优先改用 www.douyin.com 分享页；能拿到 item_list 就用，否则回退旧域名兜底。
-    page_urls = [
-        f"https://www.douyin.com/share/video/{video_id}/",
-        f"https://www.iesdouyin.com/share/video/{video_id}/",
-    ]
-    html = None
-    for page_url in page_urls:
-        html = await _fetch(page_url, headers=_headers(mobile=True), use_proxy=False)
-        if not html:
-            html = await _fetch(page_url, headers=_headers(mobile=True))
-        if html and '"item_list":[' in html:
-            break
-    if not html:
-        return _empty_result("获取页面失败")
+    # 抖音已下线分享页内嵌的 item_list JSON（share 页现返回 ~2.5KB 空壳）。
+    # 单视频改走官方 Web API aweme/v1/web/aweme/detail/（a_bogus 签名 + ttwid，匿名即可），
+    # 拿不到再回退旧分享页兜底。两者返回的 aweme 对象同构，下面提取逻辑通用。
+    item = await _fetch_aweme_detail(video_id)
+    if item is None:
+        item = await _fetch_item_from_share_page(video_id)
+    if item is None:
+        return _empty_result("解析失败：抖音接口未返回数据（可稍后重试，或 a_bogus 签名/风控问题）")
 
-    marker = '"item_list":['
-    start = html.find(marker)
-    if start < 0:
-        return _empty_result("页面解析失败，链接可能已失效")
-
-    bracket_start = html.index("[", start)
-    depth = 0
-    end = bracket_start
-    for i in range(bracket_start, len(html)):
-        if html[i] == "[":
-            depth += 1
-        elif html[i] == "]":
-            depth -= 1
-            if depth == 0:
-                end = i + 1
-                break
-
-    try:
-        items = json.loads(html[bracket_start:end])
-    except Exception:
-        return _empty_result("JSON 解析失败")
-
-    item = items[0]
     author = item.get("author", {})
     video = item.get("video", {})
     stats = item.get("statistics", {})
