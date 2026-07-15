@@ -20,6 +20,7 @@ from config import DOWNLOAD_DIR, get_active_proxy
 from deps import (
     ParseRequest, BatchParseRequest, ParseProfileRequest,
     _get_client_ip, _add_to_history, ytdlp_semaphore,
+    save_douyin_cookie, load_douyin_cookie, clear_douyin_cookie,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,8 +180,17 @@ async def parse_profile_endpoint(req: ParseProfileRequest, request: Request):
     if not _is_safe_url(url):
         raise HTTPException(status_code=403, detail="不允许访问该地址")
 
-    logger.info(f"[主页解析] 收到请求: {url[:80]}, limit={req.limit}, page={req.page}")
-    result = await parse_profile(url, limit=req.limit, page=req.page)
+    logger.info(f"[主页解析] 收到请求: {url[:80]}, limit={req.limit}, page={req.page}, cookie_len={len(req.cookie or '')}")
+
+    # Cookie 按 IP 持久化：带了新 Cookie → 存盘；没带 → 用已存的（翻页/刷新后仍可用）
+    cookie = (req.cookie or "").strip()
+    if cookie:
+        save_douyin_cookie(ip, cookie)
+    else:
+        cookie = load_douyin_cookie(ip)
+    logger.info(f"[主页解析] 生效 Cookie: saved_cookie_len={len(cookie)}")
+
+    result = await parse_profile(url, limit=req.limit, page=req.page, cookie=cookie)
 
     # 只写 1 条"主页快照"到历史，避免几百条视频淹没历史列表；翻页不重复写
     data = result.get("data") or {}
@@ -565,6 +575,34 @@ async def cookie_status():
     """检查视频号 cookie 是否已配置"""
     from parsers.wechat_channels import YUANBAO_COOKIE
     return {"configured": bool(YUANBAO_COOKIE), "length": len(YUANBAO_COOKIE)}
+
+
+# ─── 抖音主页登录 Cookie（按 IP 持久化）──────────────────
+
+@router.post("/api/douyin-cookie")
+async def set_douyin_cookie(req: CookieUpdateRequest, request: Request):
+    """保存抖音主页登录 Cookie（按客户端 IP 隔离存储）"""
+    ip = _get_client_ip(request)
+    ck = req.cookie.strip()
+    if not ck:
+        raise HTTPException(status_code=400, detail="cookie 不能为空")
+    save_douyin_cookie(ip, ck)
+    logger.info(f"[抖音Cookie] 已保存 (ip={ip}, len={len(ck)})")
+    return {"success": True, "length": len(ck)}
+
+
+@router.get("/api/douyin-cookie/status")
+async def douyin_cookie_status(request: Request):
+    """查询本 IP 是否已保存抖音 Cookie（不回传明文）"""
+    ck = load_douyin_cookie(_get_client_ip(request))
+    return {"configured": bool(ck), "length": len(ck)}
+
+
+@router.post("/api/douyin-cookie/clear")
+async def clear_douyin_cookie_endpoint(request: Request):
+    """清除本 IP 保存的抖音 Cookie"""
+    clear_douyin_cookie(_get_client_ip(request))
+    return {"success": True}
 
 
 # ─── 代理配置 ──────────────────────────────────────

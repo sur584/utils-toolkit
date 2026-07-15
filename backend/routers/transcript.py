@@ -5,16 +5,19 @@
 
 import asyncio
 import logging
+import os
+import shutil
+import tempfile
 import time
 import uuid
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
 from transcript.settings import load_settings
 from transcript.cloud_config import load_cloud_config, save_cloud_config, mask_key
-from transcript.pipeline import extract_transcript
+from transcript.pipeline import extract_transcript, extract_transcript_from_file
 from transcript.platforms._utils import _is_safe_url, _extract_url
 from transcript.asr.local_whisper import is_local_whisper_available
 from transcript.cloud_asr import get_cloud_client
@@ -31,6 +34,12 @@ settings = load_settings()
 _jobs: Dict[str, dict] = {}
 JOB_TTL = 1800  # 30 minutes
 MAX_JOBS = 100
+ALLOWED_UPLOAD_EXT = {
+    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".flv", ".m4v", ".ts", ".wmv",
+    ".mp3", ".m4a", ".wav", ".aac", ".ogg", ".flac", ".wma", ".opus",
+}
+MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
+UPLOAD_CHUNK = 1024 * 1024           # 1MB
 _semaphore = asyncio.Semaphore(settings.max_concurrent_jobs)
 
 
@@ -286,6 +295,91 @@ async def _run_job(job_id: str, req: TranscriptRequest):
             logger.error(f"Job {job_id} failed: {e}", exc_info=True)
             job["status"] = "failed"
             job["message"] = "提取失败，请稍后重试"
+
+
+@router.post("/api/transcript/upload")
+async def upload_transcript(file: UploadFile = File(...), language: str = Form("zh")):
+    _cleanup_jobs()
+    if len(_jobs) >= MAX_JOBS:
+        raise HTTPException(status_code=429, detail=_make_response(False, "任务队列已满，请稍后再试"))
+
+    filename = file.filename or "upload"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXT:
+        raise HTTPException(status_code=400, detail=_make_response(False, f"不支持的文件类型: {ext or '未知'}"))
+
+    tmp_dir = tempfile.mkdtemp(prefix="transcript_upload_")
+    file_path = os.path.join(tmp_dir, filename)
+    total = 0
+    try:
+        with open(file_path, "wb") as f:
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_SIZE:
+                    f.close()
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    raise HTTPException(status_code=413, detail=_make_response(False, "文件过大，最大支持 500MB"))
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        logger.error(f"文件上传失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=_make_response(False, "文件保存失败"))
+    finally:
+        await file.close()
+
+    if total == 0:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=_make_response(False, "文件为空"))
+
+    job_id = uuid.uuid4().hex[:8]
+    _jobs[job_id] = {
+        "job_id": job_id,
+        "status": "processing",
+        "step": "upload",
+        "progress": 0,
+        "message": "文件已上传，正在处理",
+        "result": None,
+        "created_at": time.time(),
+    }
+
+    asyncio.create_task(_run_upload_job(job_id, file_path, filename, language, tmp_dir))
+
+    return _make_response(True, "文件已上传", {"job_id": job_id, "status": "processing"})
+
+
+async def _run_upload_job(job_id: str, file_path: str, filename: str, language: str, tmp_dir: str):
+    """后台任务：本地上传文件的文案提取。"""
+    async with _semaphore:
+        job = _jobs[job_id]
+        try:
+            async def progress_cb(step, pct, msg):
+                job["step"] = step
+                job["progress"] = pct
+                job["message"] = msg
+                logger.info(f"Upload job {job_id} progress: {pct}% - {msg}")
+
+            logger.info(f"Upload job {job_id} starting for file: {filename}")
+            result = await extract_transcript_from_file(
+                file_path=file_path,
+                filename=filename,
+                language=language,
+                progress_callback=progress_cb,
+            )
+            job["status"] = "completed"
+            job["result"] = result
+            job["message"] = "提取成功"
+            logger.info(f"Upload job {job_id} completed")
+        except Exception as e:
+            logger.error(f"Upload job {job_id} failed: {e}", exc_info=True)
+            job["status"] = "failed"
+            job["message"] = "提取失败，请稍后重试"
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @router.post("/api/extract")

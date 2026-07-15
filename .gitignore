@@ -34,6 +34,10 @@ backend/app.log
 backend/test_*.py
 test_result.txt
 
+# API response dumps (temporary debug artifacts)
+/p1.json
+/p2.json
+
 # IDE
 .vscode/
 .idea/

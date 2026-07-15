@@ -157,6 +157,59 @@ async function handleProxyClear() {
 }
 
 
+// ─── 抖音主页登录 Cookie（按 IP 持久化）────────────
+async function loadDouyinCookieStatus() {
+    if (!dyCookieStatus) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/douyin-cookie/status`);
+        const data = await readJsonResponse(resp, '抖音Cookie状态接口');
+        if (data.configured) {
+            dyCookieStatus.textContent = `（已保存 · ${data.length} 字符）`;
+            dyCookieStatus.style.color = 'var(--success, #22c55e)';
+            if (dyCookieClearBtn) dyCookieClearBtn.style.display = 'inline-flex';
+        } else {
+            dyCookieStatus.textContent = '（未保存）';
+            dyCookieStatus.style.color = 'var(--danger, #ef4444)';
+            if (dyCookieClearBtn) dyCookieClearBtn.style.display = 'none';
+        }
+    } catch { /* 忽略 */ }
+}
+
+async function handleDouyinCookieSave() {
+    if (!profileCookie) return;
+    const cookie = profileCookie.value.trim();
+    if (!cookie) { showToast('请先粘贴抖音登录 Cookie', 'error'); return; }
+    try {
+        const resp = await fetch(`${API_BASE}/api/douyin-cookie`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie }),
+        });
+        const data = await readJsonResponse(resp, '保存抖音Cookie接口');
+        if (data.success) {
+            showToast('Cookie 已保存，本设备后续解析/翻页无需再粘', 'success');
+            profileCookie.value = '';  // 清空明文，避免长期停留页面
+            await loadDouyinCookieStatus();
+        } else {
+            showToast('保存失败', 'error');
+        }
+    } catch (err) {
+        showToast(`保存失败: ${err.message}`, 'error');
+    }
+}
+
+async function handleDouyinCookieClear() {
+    try {
+        await fetch(`${API_BASE}/api/douyin-cookie/clear`, { method: 'POST' });
+        if (profileCookie) profileCookie.value = '';
+        showToast('已清除本设备保存的 Cookie', 'success');
+        await loadDouyinCookieStatus();
+    } catch (err) {
+        showToast(`清除失败: ${err.message}`, 'error');
+    }
+}
+
+
 // ─── DOM ───────────────────────────────────────────
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -209,6 +262,11 @@ let downloadAbortController = null;  // 单视频下载的取消控制器（非�
 // ─── 博主主页 DOM 引用与状态 ─────────────────────
 const profileInput = $('#profileInput');
 const profileLimit = $('#profileLimit');
+const profilePageInput = $('#profilePageInput');
+const profileCookie = $('#profileCookie');
+const dyCookieSaveBtn = $('#dyCookieSaveBtn');
+const dyCookieClearBtn = $('#dyCookieClearBtn');
+const dyCookieStatus = $('#dyCookieStatus');
 const profilePasteBtn = $('#profilePasteBtn');
 const profileParseBtn = $('#profileParseBtn');
 const profileStatus = $('#profileStatus');
@@ -272,6 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initEventListeners();
     loadProxyStatus();
+    loadDouyinCookieStatus();
     // 页面加载后自动检测代理（非阻塞，不要等待完成）
     autoDetectProxy();
 });
@@ -340,18 +399,25 @@ function initEventListeners() {
         const t = await readClipboard();
         if (t) profileInput.value = t;
     });
-    if (profileParseBtn) profileParseBtn.addEventListener('click', () => handleProfileParse(1));
+    const readProfilePage = () => Math.max(1, parseInt(profilePageInput?.value, 10) || 1);
+    if (profileParseBtn) profileParseBtn.addEventListener('click', () => handleProfileParse(readProfilePage(), true));
     if (profileInput) profileInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); handleProfileParse(1); }
+        if (e.key === 'Enter') { e.preventDefault(); handleProfileParse(readProfilePage(), true); }
+    });
+    if (profilePageInput) profilePageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); handleProfileParse(readProfilePage(), true); }
     });
     if (profileSelectAll) profileSelectAll.addEventListener('change', handleProfileSelectAll);
     if (profileDownloadSelectedBtn) profileDownloadSelectedBtn.addEventListener('click', handleProfileDownloadSelected);
     if (profileZipBtn) profileZipBtn.addEventListener('click', handleProfileDownloadZip);
     if (profileCopyLinksBtn) profileCopyLinksBtn.addEventListener('click', handleProfileCopyLinks);
-    if (profilePrevBtn) profilePrevBtn.addEventListener('click', () => { if (profilePage > 1) handleProfileParse(profilePage - 1); });
-    if (profileNextBtn) profileNextBtn.addEventListener('click', () => { if (profileHasMore) handleProfileParse(profilePage + 1); });
+    if (profilePrevBtn) profilePrevBtn.addEventListener('click', () => { if (profilePage > 1) handleProfileParse(profilePage - 1, false); });
+    if (profileNextBtn) profileNextBtn.addEventListener('click', () => { if (profileHasMore) handleProfileParse(profilePage + 1, false); });
     // 改「每页数量」后从第 1 页重新解析，避免翻页中途改数量导致偏移错位
-    if (profileLimit) profileLimit.addEventListener('change', () => { if (profileUrl) handleProfileParse(1); });
+    if (profileLimit) profileLimit.addEventListener('change', () => {
+        if (profilePageInput) profilePageInput.value = 1;
+        if (profileUrl) handleProfileParse(1, true);
+    });
 
     // 手动输入视频URL
     const applyVideoUrlBtn = document.getElementById('applyVideoUrlBtn');
@@ -403,6 +469,14 @@ function initEventListeners() {
         proxyInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && proxySaveBtn) proxySaveBtn.click();
         });
+    }
+
+    // 抖音主页 Cookie
+    if (dyCookieSaveBtn) {
+        dyCookieSaveBtn.addEventListener('click', handleDouyinCookieSave);
+    }
+    if (dyCookieClearBtn) {
+        dyCookieClearBtn.addEventListener('click', handleDouyinCookieClear);
     }
 }
 
@@ -1300,9 +1374,9 @@ async function doDownload(videoUrl, title, platform, button) {
 }
 
 // ─── 博主主页解析与批量下载 ──────────────────────
-async function handleProfileParse(page = 1) {
-    // page===1 取输入框；翻页复用已保存的 profileUrl
-    const url = page === 1 ? profileInput.value.trim() : profileUrl;
+async function handleProfileParse(page = 1, fromInput = false) {
+    // fromInput（点解析/回车/改每页数量）取输入框 URL 并清空栅格；翻页复用已保存的 profileUrl
+    const url = fromInput ? profileInput.value.trim() : profileUrl;
     if (!url) { showToast('请输入博主主页链接', 'error'); return; }
 
     profileParseBtn.disabled = true;
@@ -1313,8 +1387,8 @@ async function handleProfileParse(page = 1) {
     if (btnText) btnText.style.display = 'none';
     if (btnLoading) btnLoading.style.display = 'inline-flex';
 
-    // 仅新解析（第 1 页）立即清空；翻页时保留当前页，成功后再替换，避免失败抹掉已有结果
-    if (page === 1) {
+    // 新解析（来自输入）立即清空；翻页时保留当前页，成功后再替换，避免失败抹掉已有结果
+    if (fromInput) {
         profileHeader.style.display = 'none';
         profileGrid.innerHTML = '';
         profileVideos = [];
@@ -1322,6 +1396,7 @@ async function handleProfileParse(page = 1) {
     }
 
     const limit = parseInt(profileLimit.value, 10) || 20;
+    const cookie = profileCookie ? profileCookie.value.trim() : '';
     const started = Date.now();
     showStatus(profileStatus, `🔍 正在解析主页视频列表（第 ${page} 页，可能需要 10~30 秒）...`, 'info');
 
@@ -1329,7 +1404,7 @@ async function handleProfileParse(page = 1) {
         const resp = await fetch(`${API_BASE}/api/parse-profile`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, limit, page }),
+            body: JSON.stringify({ url, limit, page, cookie }),
         });
         const result = await readJsonResponse(resp, '主页解析接口');
         const elapsed = ((Date.now() - started) / 1000).toFixed(1);
@@ -1351,6 +1426,7 @@ async function handleProfileParse(page = 1) {
         profilePlatform = data.platform || null;
         profileVideos = videos;
         profileSelected.clear();
+        if (profilePageInput) profilePageInput.value = profilePage;  // 页码框与当前页同步
         renderProfileResult(data, elapsed);
         renderProfilePager();
     } catch (err) {
@@ -1375,12 +1451,19 @@ function renderProfilePager() {
         : `第 ${profilePage} 页`;
     profilePrevBtn.disabled = profilePage <= 1;
     profileNextBtn.disabled = !profileHasMore;
+    // 页码框上限同步为总页数，便于校验跳转范围
+    if (profilePageInput && profileTotalPages) profilePageInput.max = profileTotalPages;
 }
 
 function renderProfileResult(data, elapsed) {
     const platformName = PLATFORM_NAMES[data.platform] || data.platform || '';
     profileAuthorName.textContent = data.author || '未知博主';
-    profileMeta.textContent = `${platformName} · 共 ${data.total || profileVideos.length} 个视频`;
+    // 总数优先用后端可靠的 total_count（本页条数 data.total 只是切片长度）
+    const totalCount = (data.total_count != null) ? data.total_count : (data.total || profileVideos.length);
+    let meta = `${platformName} · 共 ${totalCount} 个视频`;
+    if (data.exceeded_cap) meta += `（仅前 ${totalCount} 个，更多请翻页/登录获取）`;
+    else if (data.anonymous && data.platform === 'douyin') meta += '（未登录仅首屏，登录 Cookie 后可获取全部）';
+    profileMeta.textContent = meta;
     profileHeader.style.display = 'flex';
 
     profileGrid.innerHTML = profileVideos.map((v, i) => renderProfileCard(v, i)).join('');

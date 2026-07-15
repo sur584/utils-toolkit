@@ -2,11 +2,21 @@
 
 import re
 import json
+import time
+import random
+import string
+import asyncio
+import logging
 import html as html_lib
 from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
-from ._utils import _headers, _fetch, _follow_redirects, _make_info, _empty_result, _ok
+import httpx
+
+from ._utils import _headers, _fetch, _follow_redirects, _make_info, _empty_result, _ok, DESKTOP_UA
+from ._abogus import get_a_bogus
+
+logger = logging.getLogger(__name__)
 
 
 DOMAINS = ["v.douyin.com", "www.douyin.com", "www.iesdouyin.com", "m.douyin.com"]
@@ -193,3 +203,165 @@ async def parse(url: str) -> Dict[str, Any]:
         info["note_type"] = "video"
 
     return _ok(info)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 博主主页视频列表 API
+#
+# ⚠ 重要维护提示：
+#   抖音 Web 主页接口 aweme/v1/web/aweme/post/ 有两道反爬：
+#   ① a_bogus 签名（见 _abogus.py，会随抖音前端版本更新失效）；
+#   ② 强制登录（anonymous 请求返回 200/0 字节，响应头 x-whale-throughput-abort-data
+#      解码为 {"name":"强制登录"}）。因此**必须由用户从浏览器粘贴登录后的 Cookie**
+#      （含 sessionid_ss / passport_csrf_token 等），仅靠签名无法拿到数据。
+#   失效表现：body 为空 / aweme_list 为空 / status_code!=0。
+#   届时：从 f2 等开源项目同步更新 _abogus.py，或提示用户重新粘贴 Cookie。
+# ══════════════════════════════════════════════════════════════════════════
+
+_POST_LIST_API = "https://www.douyin.com/aweme/v1/web/aweme/post/"
+
+# ttwid 内存缓存（TTL 1h），避免每次请求都打 register 接口
+_ttwid_cache: Dict[str, Any] = {"value": "", "ts": 0.0}
+_ttwid_lock = asyncio.Lock()  # 防并发冷启动惊群，多请求只打一次 register
+_TTWID_TTL = 3600.0
+
+
+def _generate_ms_token(length: int = 107) -> str:
+    """生成随机 msToken 兜底串（[A-Za-z0-9_-]）"""
+    alphabet = string.ascii_letters + string.digits + "-_"
+    return "".join(random.choice(alphabet) for _ in range(length))
+
+
+async def _get_ttwid(force_refresh: bool = False) -> str:
+    """从 ttwid.bytedance.com register 接口获取 ttwid（带内存缓存 + 并发锁）。
+    普通首页 GET 不下发 ttwid，只有 register 接口会。拿不到返回空串（不阻断）。
+    """
+    now = time.time()
+    if not force_refresh and _ttwid_cache["value"] and (now - _ttwid_cache["ts"] < _TTWID_TTL):
+        return _ttwid_cache["value"]
+
+    async with _ttwid_lock:
+        # 拿到锁后二次检查：并发场景下可能已被前一个请求刷新
+        now = time.time()
+        if not force_refresh and _ttwid_cache["value"] and (now - _ttwid_cache["ts"] < _TTWID_TTL):
+            return _ttwid_cache["value"]
+
+        payload = {
+            "region": "cn", "aid": 1768, "needFid": False,
+            "service": "www.ixigua.com",
+            "migrate_info": {"ticket": "", "source": "node"},
+            "cbUrlProtocol": "https", "union": True,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0, verify=False, trust_env=False) as c:
+                r = await c.post(
+                    "https://ttwid.bytedance.com/ttwid/union/register/",
+                    json=payload,
+                    headers={"User-Agent": DESKTOP_UA, "Content-Type": "application/json"},
+                )
+                set_cookie = r.headers.get("set-cookie", "")
+                m = re.search(r"ttwid=([^;]+)", set_cookie)
+                if m:
+                    _ttwid_cache["value"] = m.group(1)
+                    _ttwid_cache["ts"] = now
+                    return _ttwid_cache["value"]
+        except Exception as e:
+            logger.warning(f"[抖音] 获取 ttwid 失败: {type(e).__name__}: {e}")
+        return _ttwid_cache["value"]
+
+
+def _merge_cookie(user_cookie: str, ttwid: str, ms_token: str) -> str:
+    """把用户粘贴的登录 Cookie 与 ttwid/msToken 合并成完整 Cookie 头。
+    用户 Cookie 中已有的字段优先保留，缺失的用兜底值补齐。
+    """
+    jar: Dict[str, str] = {}
+    if user_cookie:
+        # 用户常从 DevTools 整段复制，可能带 "Cookie:" 前缀，去掉避免污染首字段
+        user_cookie = re.sub(r"^\s*cookie:\s*", "", user_cookie, flags=re.I)
+        for pair in user_cookie.split(";"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                jar[k.strip()] = v.strip()
+    if ttwid and "ttwid" not in jar:
+        jar["ttwid"] = ttwid
+    if "msToken" not in jar:
+        jar["msToken"] = ms_token
+    return "; ".join(f"{k}={v}" for k, v in jar.items())
+
+
+async def fetch_user_post_list(
+    sec_uid: str, max_cursor: int = 0, count: int = 20, cookie: str = ""
+) -> Tuple[List[Dict], int, bool]:
+    """调用抖音官方 Web API 拉取博主投稿列表。
+    返回 (aweme_list, next_max_cursor, has_more)。
+    body 为空 → 刷新 ttwid 重试 1 次；仍空则 raise（签名/登录疑失效）。
+    """
+    ms_token = _generate_ms_token()
+
+    async def _once(force_refresh: bool) -> Optional[httpx.Response]:
+        ttwid = await _get_ttwid(force_refresh=force_refresh)
+        params = {
+            "device_platform": "webapp",
+            "aid": "6383",
+            "channel": "channel_pc_web",
+            "sec_user_id": sec_uid,
+            "max_cursor": str(max_cursor),
+            "count": str(count),
+            "cookie_enabled": "true",
+            "platform": "PC",
+            "downlink": "10",
+            "effective_type": "4g",
+            "round_trip_time": "50",
+            "msToken": ms_token,
+        }
+        query = urlencode(params)
+        a_bogus = get_a_bogus(query, DESKTOP_UA)
+        params["a_bogus"] = a_bogus
+        cookie_header = _merge_cookie(cookie, ttwid, ms_token)
+        headers = {
+            "User-Agent": DESKTOP_UA,
+            "Referer": f"https://www.douyin.com/user/{sec_uid}",
+            "Accept": "application/json, text/plain, */*",
+            "Cookie": cookie_header,
+        }
+        # trust_env=False：抖音国内直连，禁走代理，否则被判异常流量
+        async with httpx.AsyncClient(timeout=15.0, verify=False, trust_env=False) as c:
+            return await c.get(_POST_LIST_API, params=params, headers=headers)
+
+    r = await _once(force_refresh=False)
+    if r is None or not r.content or len(r.content) < 50:
+        logger.warning("[抖音] 主页 API 首次返回空，刷新 ttwid 重试")
+        r = await _once(force_refresh=True)
+    if r is None or not r.content or len(r.content) < 50:
+        raise RuntimeError("抖音接口返回空数据（登录 Cookie 失效或 a_bogus 签名失效）")
+
+    try:
+        data = r.json()
+    except Exception:
+        raise RuntimeError("抖音接口响应非 JSON（可能被风控或需要重新登录）")
+
+    status_code = data.get("status_code", 0)
+    if status_code != 0:
+        raise RuntimeError(f"抖音接口风控拦截 (status_code={status_code})")
+
+    aweme_list = data.get("aweme_list") or []
+    next_cursor = int(data.get("max_cursor") or 0)
+    has_more = bool(data.get("has_more"))
+    return aweme_list, next_cursor, has_more
+
+
+def extract_sec_uid(url: str) -> Optional[str]:
+    """从已展开的抖音主页 URL 中提取 sec_uid。
+    兼容 /user/{sec_uid} 路径 与 query 中的 sec_uid=... 。
+    """
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return None
+    m = re.search(r"/user/([A-Za-z0-9_\-=]+)", parts.path)
+    if m:
+        return m.group(1)
+    for k, v in parse_qsl(parts.query):
+        if k == "sec_uid" and v:
+            return v
+    return None

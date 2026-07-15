@@ -958,3 +958,69 @@ body::before {
     .import-export-bar { flex-direction: column; }
     .import-export-bar .btn { width: 100%; }
 }
+
+/* ─── 输入方式 Tab ─── */
+.tab-bar {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 16px;
+}
+.tab-item {
+    padding: 8px 20px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    transition: all .2s;
+}
+.tab-item:hover { color: var(--text-primary); }
+.tab-item.active {
+    background: var(--accent);
+    color: #fff;
+}
+.tab-panel[hidden] { display: none; }
+
+/* ─── 上传区 ─── */
+.upload-zone {
+    max-width: 740px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 40px 24px;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all .2s;
+    text-align: center;
+    background: var(--bg-card);
+}
+.upload-zone:hover,
+.upload-zone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text-primary);
+}
+.upload-hint { font-size: 15px; font-weight: 500; margin: 0; }
+.upload-sub { font-size: 12px; opacity: .7; margin: 0; }
+.upload-zone .file-name {
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 500;
+    word-break: break-all;
+    margin: 4px 0 0;
+}
+.upload-submit-btn {
+    margin: 16px auto 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.upload-submit-btn:disabled { opacity: .5; cursor: not-allowed; }

@@ -50,6 +50,11 @@
         toastContainer: $('#toastContainer'),
         progressBar: $('#progressBar'),
         progressPercent: $('#progressPercent'),
+        fileInput: $('#fileInput'),
+        uploadZone: $('#uploadZone'),
+        fileName: $('#fileName'),
+        uploadBtn: $('#uploadBtn'),
+        stepPills: $('.step-pills'),
     };
 
     // ─── State ───────────────────────────────
@@ -63,6 +68,8 @@
     var MAX_POLL = 150;
     var MAX_TOASTS = 5;
     var FETCH_TIMEOUT = 15000;
+    var selectedFile = null;
+    var currentMode = 'link';
 
     // ─── URL Extraction ─────────────────────
     function extractUrl(text) {
@@ -143,6 +150,7 @@
         elements.resultArea.style.display = 'none';
         elements.errorArea.style.display = 'none';
         clearSteps();
+        if (elements.stepPills) elements.stepPills.style.display = '';
     }
 
     // ─── Step Progress ──────────────────────
@@ -375,6 +383,63 @@
         }
     }
 
+    // ─── Tab 切换 ───────────────────────────
+    function switchTab(mode) {
+        if (mode === currentMode) return;
+        currentMode = mode;
+        resetUI();
+        $$('.tab-item').forEach(function (t) {
+            t.classList.toggle('active', t.getAttribute('data-tab') === mode);
+        });
+        $$('.tab-panel').forEach(function (p) {
+            p.hidden = p.getAttribute('data-panel') !== mode;
+        });
+    }
+
+    // ─── 文件选择 ───────────────────────────
+    function onFileSelected(file) {
+        if (!file) return;
+        selectedFile = file;
+        if (elements.fileName) {
+            elements.fileName.textContent = file.name + '  (' + (file.size / 1024 / 1024).toFixed(1) + 'MB)';
+            elements.fileName.hidden = false;
+        }
+        if (elements.uploadBtn) elements.uploadBtn.disabled = false;
+    }
+
+    // ─── 上传提交 ───────────────────────────
+    async function submitUpload() {
+        if (!selectedFile) { showToast('请先选择文件', 'error'); return; }
+
+        resetUI();
+        showProgress();
+        if (elements.stepPills) elements.stepPills.style.display = 'none';
+        setProcessing(true);
+        setProgress(5);
+        elements.statusMessage.textContent = '正在上传文件...';
+
+        var fd = new FormData();
+        fd.append('file', selectedFile);
+        fd.append('language', 'zh');
+
+        try {
+            var res = await fetch('/api/transcript/upload', { method: 'POST', body: fd });
+            var json = await res.json();
+            if (!res.ok || !json.success) {
+                var msg = (json && json.detail && json.detail.message) || (json && json.message) || ('上传失败 (' + res.status + ')');
+                throw new Error(msg);
+            }
+            var jobId = json.data && json.data.job_id;
+            if (!jobId) throw new Error('服务器未返回任务 ID');
+            elements.statusMessage.textContent = '文件已上传，正在处理...';
+            startTimer();
+            startPolling(jobId);
+        } catch (err) {
+            showError(err.message || '上传失败，请重试');
+            setProcessing(false);
+        }
+    }
+
     // ─── Polling ────────────────────────────
     function startPolling(jobId) {
         stopPolling();
@@ -566,6 +631,28 @@
                 }
             }, 100);
         });
+
+        // Tab 切换
+        $$('.tab-item').forEach(function (t) {
+            t.addEventListener('click', function () { switchTab(t.getAttribute('data-tab')); });
+        });
+        // 上传区交互
+        if (elements.uploadZone) {
+            elements.uploadZone.addEventListener('click', function () { elements.fileInput.click(); });
+            elements.uploadZone.addEventListener('dragover', function (e) { e.preventDefault(); elements.uploadZone.classList.add('dragover'); });
+            elements.uploadZone.addEventListener('dragleave', function () { elements.uploadZone.classList.remove('dragover'); });
+            elements.uploadZone.addEventListener('drop', function (e) {
+                e.preventDefault();
+                elements.uploadZone.classList.remove('dragover');
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) onFileSelected(e.dataTransfer.files[0]);
+            });
+        }
+        if (elements.fileInput) {
+            elements.fileInput.addEventListener('change', function (e) {
+                if (e.target.files && e.target.files[0]) onFileSelected(e.target.files[0]);
+            });
+        }
+        if (elements.uploadBtn) elements.uploadBtn.addEventListener('click', submitUpload);
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', function () {

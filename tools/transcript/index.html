@@ -45,16 +45,37 @@
         <!-- 支持平台图标（由 JS 从 API 动态渲染） -->
         <div class="platform-icons"></div>
 
+        <!-- 输入方式切换 -->
+        <div class="tab-bar">
+            <button class="tab-item active" data-tab="link" type="button">链接提取</button>
+            <button class="tab-item" data-tab="upload" type="button">本地上传</button>
+        </div>
+
         <!-- 搜索区域 -->
         <section class="search-section">
-            <div class="search-box">
-                <button id="pasteBtn" class="search-paste-btn" title="粘贴链接">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
-                </button>
-                <textarea id="urlInput" class="search-input" rows="1" placeholder="粘贴视频链接，支持抖音、TikTok、YouTube..."></textarea>
-                <button id="submitBtn" class="search-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    提取文案
+            <div class="tab-panel" data-panel="link">
+                <div class="search-box">
+                    <button id="pasteBtn" class="search-paste-btn" title="粘贴链接">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                    </button>
+                    <textarea id="urlInput" class="search-input" rows="1" placeholder="粘贴视频链接，支持抖音、TikTok、YouTube..."></textarea>
+                    <button id="submitBtn" class="search-btn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        提取文案
+                    </button>
+                </div>
+            </div>
+            <div class="tab-panel" data-panel="upload" hidden>
+                <div id="uploadZone" class="upload-zone">
+                    <input type="file" id="fileInput" accept="video/*,audio/*" hidden>
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <p class="upload-hint">点击或拖拽文件到此处上传</p>
+                    <p class="upload-sub">支持 MP4/MOV/MKV 等视频，MP3/M4A/WAV 等音频，最大 500MB</p>
+                    <p id="fileName" class="file-name" hidden></p>
+                </div>
+                <button id="uploadBtn" class="search-btn upload-submit-btn" disabled>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    开始转文本
                 </button>
             </div>
         </section>

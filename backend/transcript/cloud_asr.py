@@ -34,6 +34,8 @@ AUDIO_MIME_TYPES = {
 class CloudASRClient:
     """Unified cloud ASR client that dispatches to different provider types."""
 
+    MAX_SIZE = 25 * 1024 * 1024  # 云端 ASR 保守上限
+
     def __init__(self, provider_config):
         from .cloud_config import ProviderConfig
         assert isinstance(provider_config, ProviderConfig)

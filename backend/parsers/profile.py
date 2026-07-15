@@ -8,12 +8,13 @@
 import re
 import json
 import math
+import time
 import asyncio
 import logging
 from typing import Dict, Any, List, Optional, Callable
 from urllib.parse import urlparse
 
-from ._utils import _make_info, _empty_result, _ok, _fetch, _headers, _follow_redirects, DESKTOP_UA
+from ._utils import _make_info, _empty_result, _ok, _fetch, _follow_redirects, DESKTOP_UA
 from config import get_active_proxy
 from deps import ytdlp_semaphore
 
@@ -21,6 +22,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROFILE_LIMIT = 20
 MAX_PROFILE_LIMIT = 100
+
+# 抖音主页「一次抓全 + 内存缓存」参数
+MAX_DOUYIN_FETCH = 300                                # 一次抓全的硬上限（防大号拖垮低配服务端）
+_DOUYIN_LIST_CACHE: Dict[str, Dict[str, Any]] = {}   # sec_uid -> {raw, exceeded, author, had_cookie, ts}
+_DOUYIN_CACHE_TTL = 600.0                             # 10 分钟；期内翻页/换每页数量复用，不重复抓
+_DOUYIN_CACHE_MAX = 20                                # 有界，超出淘汰最旧，控内存
+_douyin_fetch_lock = asyncio.Lock()                   # 防同号并发冷启动重复抓全
 
 # 单视频 URL 特征（用于排除"这是单视频而非主页"的误判）
 _SINGLE_VIDEO_PATTERNS = {
@@ -39,14 +47,16 @@ _PROFILE_PATTERNS = {
         re.compile(r"youtube\.com/(?:c|channel|user)/[\w.-]+(?:/(?:videos|shorts|live))?/?(?:\?|$)"),
     ],
     "bilibili": [re.compile(r"space\.bilibili\.com/\d+(?:/\w+)?/?(?:\?|$)")],
-    "douyin": [re.compile(r"douyin\.com/user/[\w.=-]+")],
+    "douyin": [re.compile(r"(?:ies)?douyin\.com/(?:share/)?user/[\w.=-]+")],
     "xiaohongshu": [re.compile(r"xiaohongshu\.com/user/profile/\w+")],
 }
 
 # yt-dlp 引擎覆盖的平台
 _YTDLP_PLATFORMS = ("tiktok", "youtube", "bilibili")
 # 首屏 SSR 抓取的平台（尽力而为）
-_SSR_PLATFORMS = ("douyin", "xiaohongshu")
+_SSR_PLATFORMS = ("xiaohongshu",)
+# 官方 API 抓取的平台（需签名 + 登录 Cookie）
+_API_PLATFORMS = ("douyin",)
 
 _PLATFORM_HEADERS = {
     "tiktok": {
@@ -94,6 +104,11 @@ def _normalize_profile_url(url: str, platform: str) -> str:
     elif platform == "bilibili":
         if not url.endswith("/video"):
             url = url + "/video"
+    elif platform == "douyin":
+        # 短链展开后可能是 iesdouyin.com/share/user/{sec_uid}，统一成标准主页 URL
+        m = re.search(r"/user/([\w.=-]+)", urlparse(url).path)
+        if m:
+            url = f"https://www.douyin.com/user/{m.group(1)}"
     return url
 
 
@@ -323,57 +338,158 @@ def _deep_find_lists(obj: Any, key: str) -> List[Any]:
     return found
 
 
-async def _parse_profile_douyin(url: str, limit: int) -> Dict[str, Any]:
-    html = await _fetch(url, headers=_headers(referer="https://www.douyin.com/", mobile=False))
-    if not html:
-        return _empty_result("抖音主页抓取失败，建议粘贴单个视频链接")
+async def _get_douyin_full_list(sec_uid: str, cookie: str) -> Dict[str, Any]:
+    """一次性抓全抖音博主投稿列表（上限 MAX_DOUYIN_FETCH），带 per-sec_uid 内存缓存。
 
-    # 抖音首屏 SSR 数据可能在 _ROUTER_DATA / RENDER_DATA，结构多变，深度搜 aweme 列表
-    data = _extract_json_after(html, '_ROUTER_DATA') or _extract_json_after(html, 'RENDER_DATA')
-    videos: List[Dict[str, Any]] = []
-    author = ""
-    seen = set()
-    if data:
-        for lst in _deep_find_lists(data, "aweme_list") + _deep_find_lists(data, "awemeList"):
-            for item in lst:
-                if not isinstance(item, dict):
+    抖音接口是游标（max_cursor/has_more）分页，且每批返回条数由服务端决定（会递减）。
+    此处循环推进游标累积至抓完或触顶，按 aweme_id 去重，供上层按页码切片——
+    从而保证每页条数一致、总数可知。返回 {"raw", "exceeded", "author", "ts"}。
+    匿名（无 Cookie）通常只能拿首批（~32 条），游标推进返回空即停。
+    """
+    from .douyin import fetch_user_post_list
+
+    has_cookie = bool(cookie)
+
+    def _usable(e: Dict[str, Any]) -> bool:
+        # 未过期，且不能用「匿名残缺缓存」应付「带 Cookie 的请求」
+        # （匿名仅首屏 ~32 条，带 Cookie 需重抓才能拿全）
+        if time.time() - e["ts"] >= _DOUYIN_CACHE_TTL:
+            return False
+        if has_cookie and not e.get("had_cookie"):
+            return False
+        return True
+
+    ent = _DOUYIN_LIST_CACHE.get(sec_uid)
+    if ent and _usable(ent):
+        return ent
+
+    async with _douyin_fetch_lock:
+        # 拿锁后二次检查：并发同号时可能已被前一个请求抓好
+        ent = _DOUYIN_LIST_CACHE.get(sec_uid)
+        if ent and _usable(ent):
+            return ent
+
+        collected: List[Dict[str, Any]] = []
+        seen: set = set()
+        cursor = 0
+        has_more = True
+        exceeded = False
+        author = ""
+
+        while has_more and len(collected) < MAX_DOUYIN_FETCH:
+            aweme_list, next_cursor, has_more = await fetch_user_post_list(
+                sec_uid, max_cursor=cursor, count=50, cookie=cookie
+            )
+            if not aweme_list:
+                break
+            for it in aweme_list:
+                if not isinstance(it, dict):
                     continue
-                vid = str(item.get("aweme_id") or item.get("awemeId") or "")
+                vid = str(it.get("aweme_id") or "")
                 if not vid or vid in seen:
                     continue
                 seen.add(vid)
-                video = item.get("video") or {}
-                cover = video.get("cover") or video.get("origin_cover") or {}
-                cover_url = ""
-                if isinstance(cover, dict):
-                    ul = cover.get("url_list") or cover.get("urlList") or []
-                    cover_url = ul[0] if ul else ""
+                collected.append(it)
                 if not author:
-                    author = (item.get("author") or {}).get("nickname", "")
-                videos.append(_make_info(
-                    id=vid, platform="douyin",
-                    title=(item.get("desc") or "无标题")[:200],
-                    author=author or "未知作者",
-                    cover=cover_url,
-                    duration=(video.get("duration") or 0) // 1000,
-                    video_url=f"https://www.douyin.com/video/{vid}",
-                    video_url_no_watermark=f"https://www.douyin.com/video/{vid}",
-                    detail_url=f"https://www.douyin.com/video/{vid}",
-                    need_reparse=True,
-                ))
-                if len(videos) >= limit:
-                    break
-            if len(videos) >= limit:
+                    author = (it.get("author") or {}).get("nickname", "")
+            cursor = next_cursor
+            if len(collected) >= MAX_DOUYIN_FETCH:
+                exceeded = has_more  # 触顶但抖音仍有更多 → 标记超上限
                 break
+            if has_more:
+                await asyncio.sleep(0.4)  # 防风控轻微延时
 
-    if not videos:
-        return _empty_result("抖音主页首屏无数据（可能被风控或已改版），建议粘贴单个视频链接")
+        ent = {"raw": collected, "exceeded": exceeded, "author": author,
+               "had_cookie": has_cookie, "ts": time.time()}
+        # 写缓存前控内存：超出上限淘汰最旧一条
+        if sec_uid not in _DOUYIN_LIST_CACHE and len(_DOUYIN_LIST_CACHE) >= _DOUYIN_CACHE_MAX:
+            oldest = min(_DOUYIN_LIST_CACHE, key=lambda k: _DOUYIN_LIST_CACHE[k]["ts"])
+            _DOUYIN_LIST_CACHE.pop(oldest, None)
+        _DOUYIN_LIST_CACHE[sec_uid] = ent
+        return ent
+
+
+async def _parse_profile_douyin(url: str, limit: int, page: int = 1, cookie: str = "") -> Dict[str, Any]:
+    """抖音博主主页：一次抓全（≤300）后按页码切片，保证每页条数一致、总数可知。
+
+    需 a_bogus 签名 + 用户登录 Cookie（匿名仅首屏 ~32 条）。抓全结果按 sec_uid 缓存，
+    翻页/换每页数量在 TTL 内复用，不重复抓。实际下载仍复用最稳的 iesdouyin 单视频路径
+    （need_reparse=True，下载时前端回填）。
+    """
+    from .douyin import extract_sec_uid
+
+    sec_uid = extract_sec_uid(url)
+    if not sec_uid:
+        return _empty_result("无法从链接中提取用户 sec_uid，请确认是抖音主页链接")
+
+    try:
+        ent = await _get_douyin_full_list(sec_uid, cookie)
+    except RuntimeError as e:
+        msg = str(e)
+        if page > 1 and not cookie:
+            return _empty_result("抖音匿名仅能获取第一页，翻页请在上方展开并粘贴登录 Cookie")
+        if "登录" in msg or "a_bogus" in msg or "空数据" in msg:
+            return _empty_result("抖音接口未返回数据：登录 Cookie 可能失效，请重新从浏览器粘贴 Cookie")
+        if "风控" in msg:
+            return _empty_result("可能被抖音风控拦截，请稍后再试")
+        return _empty_result(f"抖音主页解析失败：{msg}")
+    except Exception as e:
+        logger.warning(f"[抖音主页] 请求异常: {type(e).__name__}: {e}")
+        return _empty_result("抖音主页请求异常，请稍后再试")
+
+    raw = ent["raw"]
+    author = ent["author"]
+    if not raw:
+        return _empty_result("未获取到作品：该账号可能无公开作品/为私密账号，或登录 Cookie 已失效")
+
+    page_size = limit
+    total = len(raw)
+    total_pages = max(1, math.ceil(total / page_size))
+    start = (page - 1) * page_size
+    window = raw[start:start + page_size]  # 精确切片 → 每页条数一致（末页可不足）
+
+    if not window:
+        # 请求页超出范围：匿名多为「首屏之外需登录」，其余为「没有更多」
+        if page > 1 and not cookie:
+            return _empty_result("抖音匿名仅能获取第一页，翻页请在上方展开并粘贴登录 Cookie")
+        return _empty_result("该页没有作品了")
+
+    videos: List[Dict[str, Any]] = []
+    for item in window:
+        vid = str(item.get("aweme_id") or "")
+        if not vid:
+            continue
+        video = item.get("video") or {}
+        cover = video.get("cover") or video.get("origin_cover") or {}
+        cover_url = ""
+        if isinstance(cover, dict):
+            ul = cover.get("url_list") or []
+            cover_url = ul[0] if ul else ""
+        stats = item.get("statistics") or {}
+        videos.append(_make_info(
+            id=vid, platform="douyin",
+            title=(item.get("desc") or "无标题")[:200],
+            author=author or "未知作者",
+            cover=cover_url,
+            duration=(video.get("duration") or 0) // 1000,
+            video_url=f"https://www.douyin.com/video/{vid}",
+            video_url_no_watermark=f"https://www.douyin.com/video/{vid}",
+            detail_url=f"https://www.douyin.com/video/{vid}",
+            need_reparse=True,
+            create_time=item.get("create_time", 0),
+            digg_count=stats.get("digg_count", 0),
+            comment_count=stats.get("comment_count", 0),
+            share_count=stats.get("share_count", 0),
+        ))
 
     return _ok({
         "platform": "douyin", "author": author or "未知作者",
         "profile_url": url, "total": len(videos), "videos": videos,
-        "partial": True, "page": 1, "page_size": limit,
-        "has_more": False, "total_count": len(videos), "total_pages": 1,
+        "page": page, "page_size": page_size,
+        "total_count": total, "total_pages": total_pages,
+        "has_more": page < total_pages,       # 从缓存判断，可靠
+        "exceeded_cap": ent["exceeded"],      # 超 300 → 前端提示
+        "anonymous": not bool(cookie),        # 未登录 → 前端提示登录可获取全部
     })
 
 
@@ -448,8 +564,8 @@ async def _parse_profile_xiaohongshu(url: str, limit: int) -> Dict[str, Any]:
 _SHORT_LINK_HOSTS = ("v.douyin.com", "vm.tiktok.com", "vt.tiktok.com", "b23.tv", "xhslink.com", "youtu.be")
 
 
-async def parse_profile(url: str, limit: int = DEFAULT_PROFILE_LIMIT, page: int = 1) -> Dict[str, Any]:
-    """解析博主主页，返回视频列表（支持分页：仅 yt-dlp 平台）"""
+async def parse_profile(url: str, limit: int = DEFAULT_PROFILE_LIMIT, page: int = 1, cookie: str = "") -> Dict[str, Any]:
+    """解析博主主页，返回视频列表（yt-dlp/抖音 API 支持分页；抖音需登录 Cookie）"""
     url = url.strip()
     limit = min(max(limit, 1), MAX_PROFILE_LIMIT)
     page = max(page, 1)
@@ -467,7 +583,7 @@ async def parse_profile(url: str, limit: int = DEFAULT_PROFILE_LIMIT, page: int 
             logger.warning(f"[主页解析] 短链展开失败: {str(e)[:100]}")
 
     platform = detect_platform(url)
-    if not platform or platform not in (_YTDLP_PLATFORMS + _SSR_PLATFORMS):
+    if not platform or platform not in (_YTDLP_PLATFORMS + _SSR_PLATFORMS + _API_PLATFORMS):
         return _empty_result(f"当前不支持该平台的主页批量解析：{platform or '未知平台'}")
 
     sp = _SINGLE_VIDEO_PATTERNS.get(platform)
@@ -478,9 +594,9 @@ async def parse_profile(url: str, limit: int = DEFAULT_PROFILE_LIMIT, page: int 
     if detect_profile_url(url) != platform:
         return _empty_result("请粘贴博主主页链接（不支持合集 / 搜索 / 子页面）")
 
-    # 抖音/小红书 仅首屏，不支持翻页
+    # 小红书 仅首屏，不支持翻页（抖音走 API 支持翻页，不在此拦截）
     if platform in _SSR_PLATFORMS and page > 1:
-        return _empty_result("抖音/小红书 仅支持首屏，不支持翻页；如需更多请粘贴单个视频链接")
+        return _empty_result("小红书仅支持首屏，不支持翻页；如需更多请粘贴单个视频链接")
 
     normalized = _normalize_profile_url(url, platform)
     logger.info(f"[主页解析] platform={platform}, url={normalized}, limit={limit}, page={page}")
@@ -488,7 +604,7 @@ async def parse_profile(url: str, limit: int = DEFAULT_PROFILE_LIMIT, page: int 
     if platform in _YTDLP_PLATFORMS:
         return await _parse_profile_ytdlp(normalized, platform, limit, page)
     if platform == "douyin":
-        return await _parse_profile_douyin(normalized, limit)
+        return await _parse_profile_douyin(normalized, limit, page, cookie)
     if platform == "xiaohongshu":
         return await _parse_profile_xiaohongshu(normalized, limit)
     return _empty_result("暂不支持该平台的主页批量解析")

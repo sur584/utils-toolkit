@@ -118,8 +118,9 @@ async def _extract_douyin(url: str, method: str, language: str, settings, progre
             await progress("asr", 65, "正在上传音频...")
 
             audio_bytes = Path(audio_path).read_bytes()
-            if len(audio_bytes) > 25 * 1024 * 1024:
-                raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过 25MB 限制")
+            _limit = _asr_size_limit(settings)
+            if _limit is not None and len(audio_bytes) > _limit:
+                raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过当前引擎 {_limit // 1024 // 1024}MB 限制")
 
             await progress("asr", 70, "正在进行语音识别...")
             transcript = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
@@ -190,8 +191,9 @@ async def _extract_wechat(url: str, method: str, language: str, settings, progre
 
             await progress("asr", 65, "正在上传音频...")
             audio_bytes = Path(audio_path).read_bytes()
-            if len(audio_bytes) > 25 * 1024 * 1024:
-                raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过 25MB 限制")
+            _limit = _asr_size_limit(settings)
+            if _limit is not None and len(audio_bytes) > _limit:
+                raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过当前引擎 {_limit // 1024 // 1024}MB 限制")
 
             await progress("asr", 70, "正在进行语音识别...")
             transcript = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)
@@ -274,6 +276,112 @@ async def _transcribe_with_fallback(audio_bytes, language, settings, progress_cb
         raise
 
 
+_FALLBACK_SIZE_LIMIT = 25 * 1024 * 1024  # 无法确定引擎时的保守上限
+
+
+def _asr_size_limit(settings) -> Optional[int]:
+    """当前 ASR 引擎的音频大小上限（字节）；None 表示无限制（本地 Whisper）。"""
+    try:
+        from .asr import get_asr_client
+        client = get_asr_client(settings.asr_provider)
+        return getattr(client, "MAX_SIZE", None)
+    except Exception:
+        return _FALLBACK_SIZE_LIMIT
+
+
+async def _compress_audio_adaptive(
+    src_path: str, output_prefix: str,
+    size_limit: Optional[int] = None, progress_cb=None,
+) -> str:
+    """转 16kHz 单声道 mp3；有上限时自适应降码率直到不超过上限。"""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return src_path
+
+    audio_path = output_prefix + ".mp3"
+
+    async def _run(bitrate: int) -> bool:
+        cmd = [
+            ffmpeg, "-i", src_path,
+            "-vn", "-ar", "16000", "-ac", "1",
+            "-f", "mp3", "-b:a", f"{bitrate}k", "-threads", "0",
+            "-y", audio_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=300)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return False
+        return proc.returncode == 0 and Path(audio_path).exists()
+
+    if size_limit is None:
+        if await _run(48):
+            return audio_path
+        return src_path
+
+    for bitrate in (48, 32, 24, 16, 12):
+        if not await _run(bitrate):
+            continue
+        if Path(audio_path).stat().st_size <= size_limit:
+            return audio_path
+    return audio_path if Path(audio_path).exists() else src_path
+
+
+async def extract_transcript_from_file(
+    file_path: str, filename: str,
+    language: str = "zh", progress_callback: Optional[Callable] = None,
+) -> dict:
+    """本地上传文件提取流程：转码压缩 → 大小校验 → ASR → 转简体。"""
+    async def progress(step, pct, msg):
+        if progress_callback:
+            await progress_callback(step, pct, msg)
+
+    settings = load_settings()
+    title = Path(filename).stem[:100] or "本地文件"
+    size_limit = _asr_size_limit(settings)
+
+    await progress("upload", 15, "文件已接收...")
+    async with temp_workspace() as tmp:
+        await progress("transcode", 30, "正在转码压缩音频...")
+        audio_path = await _compress_audio_adaptive(
+            file_path, str(tmp / "audio"), size_limit, progress_callback
+        )
+
+        audio_bytes = Path(audio_path).read_bytes()
+        if size_limit is not None and len(audio_bytes) > size_limit:
+            raise RuntimeError(
+                f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，"
+                f"超过当前引擎 {size_limit // 1024 // 1024}MB 限制"
+            )
+
+        await progress("asr", 70, "正在进行语音识别...")
+        transcript = await _transcribe_with_fallback(
+            audio_bytes, language, settings, progress_callback
+        )
+
+    if not transcript:
+        raise RuntimeError("未能提取到文案内容")
+
+    transcript = _to_simplified(transcript)
+    await progress("done", 100, "提取完成")
+
+    return {
+        "method_used": "asr",
+        "transcript": transcript,
+        "title": title,
+        "platform": "local",
+        "author": "本地文件",
+        "cover": "",
+        "video_url": "",
+        "duration": 0,
+        "char_count": len(transcript),
+    }
+
+
 async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
                          language: str, settings, progress_cb) -> dict:
     """其他平台的 yt-dlp 提取流程"""
@@ -328,8 +436,9 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
             await progress("asr", 65, "正在上传音频...")
 
             audio_bytes = audio_file.read_bytes()
-            if len(audio_bytes) > 25 * 1024 * 1024:
-                raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过 25MB 限制")
+            _limit = _asr_size_limit(settings)
+            if _limit is not None and len(audio_bytes) > _limit:
+                raise RuntimeError(f"音频文件过大 ({len(audio_bytes) // 1024 // 1024}MB)，超过当前引擎 {_limit // 1024 // 1024}MB 限制")
 
             await progress("asr", 70, "正在进行语音识别...")
             transcript = await _transcribe_with_fallback(audio_bytes, language, settings, progress_cb)

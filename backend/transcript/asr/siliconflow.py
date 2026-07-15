@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 class SiliconFlowASR:
     """ASR client for audio transcription (OpenAI-compatible API)."""
 
+    MAX_SIZE = 25 * 1024 * 1024  # SiliconFlow/MiMo API 单文件上限
+
     DEFAULT_API_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
 
     def __init__(self, api_key: str, model: str = "mimo-v2.5-asr"):

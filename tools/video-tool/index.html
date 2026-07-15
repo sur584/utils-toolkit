@@ -228,17 +228,22 @@
                         id="profileInput"
                         class="url-input"
                         style="min-height:48px;padding:12px"
-                        placeholder="粘贴主页链接，例如：&#10;https://www.tiktok.com/@neleus0102（TikTok / YouTube 稳定）&#10;https://www.youtube.com/@mkbhd&#10;抖音 / 小红书仅支持首屏（约 10-20 个，翻页受限）"
+                        placeholder="粘贴主页链接，例如：&#10;https://www.tiktok.com/@neleus0102（TikTok / YouTube 稳定）&#10;https://www.youtube.com/@mkbhd&#10;抖音需粘贴登录 Cookie（见下方），支持翻页；小红书仅首屏"
                     >
                     <div class="input-actions">
                         <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text-secondary)">
                             每页数量
                             <select id="profileLimit" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary)">
                                 <option value="10">10</option>
-                                <option value="20" selected>20</option>
-                                <option value="50">50</option>
+                                <option value="20">20</option>
+                                <option value="50" selected>50</option>
                                 <option value="100">100</option>
                             </select>
+                        </label>
+                        <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text-secondary)">
+                            第
+                            <input type="number" id="profilePageInput" min="1" value="1" style="width:64px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary)">
+                            页
                         </label>
                         <button class="btn btn-secondary" id="profilePasteBtn">📋 粘贴</button>
                         <button class="btn btn-primary" id="profileParseBtn">
@@ -249,6 +254,25 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- 抖音主页需登录 Cookie（其它平台留空即可） -->
+                <details style="margin-top:10px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--bg-card)">
+                    <summary style="cursor:pointer;font-size:13px;color:var(--text-secondary)">🔑 抖音主页需登录 Cookie（点击展开填写，其它平台无需填）</summary>
+                    <textarea
+                        id="profileCookie"
+                        rows="3"
+                        style="width:100%;margin-top:8px;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text-primary);font-size:12px;font-family:monospace;resize:vertical"
+                        placeholder="从浏览器登录抖音后，F12 → Network → 任意 douyin.com 请求 → 复制 Cookie 请求头整段粘贴到此（需含 sessionid_ss）"
+                    ></textarea>
+                    <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+                        <span id="dyCookieStatus" style="font-size:12px;color:var(--danger)">（未保存）</span>
+                        <button class="btn btn-primary btn-sm" id="dyCookieSaveBtn">保存 Cookie</button>
+                        <button class="btn btn-ghost btn-sm" id="dyCookieClearBtn" style="display:none">清除</button>
+                    </div>
+                    <p style="margin:6px 0 0;font-size:12px;color:var(--text-secondary)">
+                        抖音主页接口有「强制登录」反爬，匿名请求拿不到数据。保存后本设备无需再次粘贴（按 IP 存储，其他设备不共用）。Cookie 仅本地转发给抖音，不作外发。失效后重新粘贴即可。
+                    </p>
+                </details>
 
                 <div class="status-bar" id="profileStatus" style="display:none">
                     <span class="status-text"></span>
@@ -318,6 +342,6 @@
         <p>小小工具箱 &mdash; 视频解析下载 v2.0 &mdash; 支持 10+ 主流平台</p>
     </footer>
 
-    <script src="./js/app.js"></script>
+    <script src="./js/app.js?v=20260715"></script>
 </body>
 </html>
