@@ -51,6 +51,46 @@ async def _watch_disconnect(request: Request, event: threading.Event):
         logger.warning(f"[下载] 断连监视异常: {e}")
 
 
+class _UpstreamError(Exception):
+    """上游（视频/CDN）拉取失败，用于在上层映射为 502。"""
+
+
+async def _fetch_upstream(url: str, headers: dict, timeout: float = 60, max_retries: int = 2):
+    """拉取上游二进制内容（优先直连，失败再走代理兜底）。
+
+    与解析逻辑保持一致：默认绕过系统代理（trust_env=False）直连抖音等国内 CDN，
+    避免本地代理（如 Clash）对国内 CDN 偶发返回 502；若直连失败再尝试代理。
+    对 5xx / 连接错误做有限重试，吸收 CDN 的瞬时 502。
+    4xx（403/404 等）视为不可恢复，直接抛出。
+    """
+    last_err = "未知错误"
+    for attempt in range(max_retries):
+        for via_proxy in (False, True):
+            try:
+                kwargs = dict(timeout=timeout, verify=False, follow_redirects=True)
+                if via_proxy:
+                    proxy = get_active_proxy()
+                    if not proxy:
+                        continue
+                    kwargs["proxies"] = proxy
+                else:
+                    kwargs["trust_env"] = False
+                async with httpx.AsyncClient(**kwargs) as client:
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code == 200:
+                        return resp.content, resp.headers.get("content-type", "video/mp4")
+                    last_err = f"上游返回 {resp.status_code}"
+                    if 400 <= resp.status_code < 500:
+                        raise _UpstreamError(last_err)
+            except _UpstreamError:
+                raise
+            except Exception as e:
+                last_err = f"{type(e).__name__}: {e}"
+        if attempt < max_retries - 1:
+            await asyncio.sleep(0.5)
+    raise _UpstreamError(last_err)
+
+
 @router.get("/api/health")
 async def health_check():
     return {"status": "ok", "version": "3.0.0"}
@@ -226,15 +266,12 @@ async def proxy_video(video_url: str = Query(...), referer: str = Query("https:/
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": referer,
         }
-        # 先获取完整内容再返回（避免流式传输的 chunked encoding 问题）
-        async with httpx.AsyncClient(timeout=60, verify=False, follow_redirects=True) as client:
-            resp = await client.get(video_url, headers=headers)
-
-            if resp.status_code != 200:
-                raise HTTPException(status_code=502, detail=f"上游返回 {resp.status_code}")
-
-            content_type = resp.headers.get("content-type", "video/mp4")
-            content = resp.content
+        # 优先直连（绕过系统代理，与解析逻辑一致），失败再走代理兜底；并对 5xx 做有限重试。
+        # 直连可避开本地代理对抖音 CDN 偶发的 502，重试可吸收抖音 CDN 本身的瞬时 502。
+        try:
+            content, content_type = await _fetch_upstream(video_url, headers, timeout=60)
+        except _UpstreamError as e:
+            raise HTTPException(status_code=502, detail=f"视频代理获取失败: {e}")
 
         return StreamingResponse(
             iter([content]),
@@ -448,7 +485,7 @@ async def download_video(
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": "https://channels.weixin.qq.com/",
             }
-            async with httpx.AsyncClient(timeout=120, verify=False, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=120, verify=False, follow_redirects=True, trust_env=False) as client:
                 async with client.stream("GET", actual_url, headers=headers) as resp:
                     if resp.status_code != 200:
                         raise HTTPException(status_code=502, detail=f"微信视频下载失败 (HTTP {resp.status_code})")
@@ -502,21 +539,51 @@ async def download_video(
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": referer,
         }
-        async with httpx.AsyncClient(timeout=120, verify=False, follow_redirects=True) as client:
-            async with client.stream("GET", video_url, headers=headers) as resp:
-                if resp.status_code != 200:
-                    raise HTTPException(status_code=502, detail=f"下载失败 (HTTP {resp.status_code})")
-                with open(filepath, "wb") as f:
-                    async for chunk in resp.aiter_bytes(65536):
-                        if cancel_event.is_set():
-                            f.close()
-                            try:
-                                filepath.unlink(missing_ok=True)
-                            except OSError:
-                                pass
-                            logger.info(f"[下载] 已被客户端取消: {video_url[:100]}")
-                            raise HTTPException(status_code=499, detail="下载已取消")
-                        f.write(chunk)
+        # 直连优先（绕过系统代理，避免本地代理对抖音 CDN 偶发 502），失败再走代理；
+        # 对 5xx / 连接错误重试，吸收 CDN 瞬时 502。
+        configs = [{"timeout": 120, "verify": False, "follow_redirects": True, "trust_env": False}]
+        proxy = get_active_proxy()
+        if proxy:
+            configs.append({"timeout": 120, "verify": False, "follow_redirects": True, "proxies": proxy})
+        last_err = None
+        done = False
+        for attempt in range(3):
+            for cfg in configs:
+                try:
+                    async with httpx.AsyncClient(**cfg) as client:
+                        async with client.stream("GET", video_url, headers=headers) as resp:
+                            if resp.status_code == 200:
+                                with open(filepath, "wb") as f:
+                                    async for chunk in resp.aiter_bytes(65536):
+                                        if cancel_event.is_set():
+                                            f.close()
+                                            try:
+                                                filepath.unlink(missing_ok=True)
+                                            except OSError:
+                                                pass
+                                            logger.info(f"[下载] 已被客户端取消: {video_url[:100]}")
+                                            raise HTTPException(status_code=499, detail="下载已取消")
+                                        f.write(chunk)
+                                done = True
+                                break
+                            elif 400 <= resp.status_code < 500:
+                                last_err = f"下载失败 (HTTP {resp.status_code})"
+                                break
+                            else:
+                                last_err = f"下载失败 (HTTP {resp.status_code})"
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    last_err = f"{type(e).__name__}: {e}"
+            if done:
+                break
+            if attempt < 2 and last_err and any(k in last_err for k in ("502", "503", "500", "Connect", "timeout", "Timeout", "Read", "EOF")):
+                await asyncio.sleep(0.5)
+                continue
+            break
+
+        if not done:
+            raise HTTPException(status_code=502, detail=last_err or "下载失败")
 
         # 验证下载的视频文件
         if not _is_valid_video(filepath):
