@@ -5,6 +5,7 @@
 
 import sys
 import os
+import asyncio
 from contextlib import asynccontextmanager
 
 # 添加 backend 目录到 sys.path 以便 import 同级模块
@@ -16,10 +17,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.exception_handlers import http_exception_handler
 
+from config import cleanup_download_dir, DOWNLOAD_MAX_AGE_HOURS
 from deps import model_manager, disk_cache
 from routers import video, bg_remove, text_remove, watermark, watermark_removal, upscale, history, static
 
 logger = logging.getLogger(__name__)
+
+# 下载缓存定时清理间隔（秒）
+_DOWNLOAD_CLEAN_INTERVAL = 1800
 
 # 安全导入 transcript 模块（依赖缺失时优雅降级）
 TRANSCRIPT_AVAILABLE = False
@@ -31,6 +36,18 @@ except ImportError as e:
     logger.warning(f"可尝试手动修复: {sys.executable} -m pip install python-dotenv aiofiles faster-whisper")
 
 
+async def _download_cleanup_loop():
+    """定时清理下载缓存目录中的旧文件。"""
+    while True:
+        await asyncio.sleep(_DOWNLOAD_CLEAN_INTERVAL)
+        try:
+            n = await asyncio.to_thread(cleanup_download_dir)
+            if n:
+                logger.info(f"下载缓存定时清理：删除 {n} 个超过 {DOWNLOAD_MAX_AGE_HOURS}h 的文件")
+        except Exception as e:
+            logger.warning(f"下载缓存清理异常: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_app):
     # 启动时：清理缓存 + 启动后台清理
@@ -40,8 +57,19 @@ async def lifespan(_app):
     except Exception as e:
         logger.warning(f"缓存清理失败: {e}")
     disk_cache.start_background_cleanup()
+
+    # 下载缓存：启动清一次 + 定时清理
+    try:
+        n = cleanup_download_dir()
+        logger.info(f"下载缓存启动清理：删除 {n} 个超过 {DOWNLOAD_MAX_AGE_HOURS}h 的文件")
+    except Exception as e:
+        logger.warning(f"下载缓存启动清理失败: {e}")
+    dl_cleanup_task = asyncio.create_task(_download_cleanup_loop())
+
     yield
+
     # 关闭时：停止后台清理
+    dl_cleanup_task.cancel()
     disk_cache.stop_background_cleanup()
 
 

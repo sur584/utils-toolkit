@@ -119,6 +119,31 @@ MODELS_DIR.mkdir(exist_ok=True)
 # 让 rembg 把模型存到项目内的 models 目录
 os.environ["U2NET_HOME"] = str(MODELS_DIR)
 
+# ─── 下载缓存清理 ─────────────────────────────────────
+# downloads/ 是「下载到服务端磁盘再回传」的缓存目录，只增不减。
+# 启动时 + 定时删除超过 DOWNLOAD_MAX_AGE_HOURS 的旧文件，保留短期「秒回」缓存。
+DOWNLOAD_MAX_AGE_HOURS = 6.0
+
+
+def cleanup_download_dir(max_age_hours: float = DOWNLOAD_MAX_AGE_HOURS) -> int:
+    """删除 DOWNLOAD_DIR 中修改时间超过 max_age_hours 的文件，返回删除数量。"""
+    import time
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    try:
+        entries = list(DOWNLOAD_DIR.iterdir())
+    except OSError:
+        return 0
+    for f in entries:
+        try:
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+                removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 # ─── 日志 ─────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
