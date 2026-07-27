@@ -13,7 +13,7 @@ DOMAINS = ["twitter.com", "x.com", "www.twitter.com", "www.x.com", "t.co"]
 
 
 async def _parse_via_ytdlp(url: str) -> Optional[Dict[str, Any]]:
-    def _extract():
+    def _extract(proxy: str = ""):
         import yt_dlp
         ydl_opts = {
             "quiet": True,
@@ -22,15 +22,22 @@ async def _parse_via_ytdlp(url: str) -> Optional[Dict[str, Any]]:
             "socket_timeout": 20,
             "format": "best[ext=mp4]/best",
         }
-        proxy = get_active_proxy()
         if proxy:
             ydl_opts["proxy"] = proxy
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(url, download=False)
 
     try:
-        return await asyncio.to_thread(_extract)
+        # 先试直连（本地网络/系统代理已在 yt-dlp 层面生效）
+        return await asyncio.to_thread(_extract, "")
     except Exception:
+        # 直连失败，尝试配置的代理
+        proxy = get_active_proxy()
+        if proxy:
+            try:
+                return await asyncio.to_thread(_extract, proxy)
+            except Exception:
+                return None
         return None
 
 

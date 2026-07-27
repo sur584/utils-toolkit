@@ -834,7 +834,9 @@ async function handleDownload() {
     showStatus(statusBar, '⏳ 正在获取视频（可点击按钮取消）...', 'info');
 
     try {
-        const videoUrl = currentVideoData.video_url_no_watermark || currentVideoData.video_url || '';
+        const videoUrl = (currentVideoData.video_url?.startsWith('tw://'))
+            ? currentVideoData.video_url
+            : (currentVideoData.video_url_no_watermark || currentVideoData.video_url || '');
         const title = (currentVideoData.title || 'video').substring(0, 50);
         const ref = getReferer(currentVideoData.platform);
 
@@ -1272,7 +1274,7 @@ function _buildBatchItem(result, index = 0, url = '') {
     const seqBadge = index ? `<span class="batch-item-seq">${index}</span>` : '';
     if (result.success && result.data) {
         const d = result.data;
-        const vUrl = (d.video_url?.startsWith('yt://') || d.video_url?.startsWith('tt://') || d.video_url?.startsWith('bl://') || d.video_url?.startsWith('wx://'))
+        const vUrl = (d.video_url?.startsWith('yt://') || d.video_url?.startsWith('tt://') || d.video_url?.startsWith('bl://') || d.video_url?.startsWith('wx://') || d.video_url?.startsWith('tw://'))
             ? d.video_url : (d.video_url_no_watermark || d.video_url);
         const pName = PLATFORM_NAMES[d.platform] || d.platform || '';
         div.innerHTML = `
@@ -1338,7 +1340,7 @@ async function loadHistory() {
         history.forEach((item) => {
             const div = document.createElement('div');
             div.className = 'history-item';
-            const vUrl = (item.video_url?.startsWith('yt://') || item.video_url?.startsWith('tt://') || item.video_url?.startsWith('bl://') || item.video_url?.startsWith('wx://'))
+            const vUrl = (item.video_url?.startsWith('yt://') || item.video_url?.startsWith('tt://') || item.video_url?.startsWith('bl://') || item.video_url?.startsWith('wx://') || item.video_url?.startsWith('tw://'))
                 ? item.video_url : (item.video_url_no_watermark || item.video_url);
             const pName = PLATFORM_NAMES[item.platform] || item.platform || '';
             div.innerHTML = `
@@ -1701,7 +1703,9 @@ async function downloadProfileVideo(idx, button) {
                 showToast(`「${(v.title || '视频').substring(0, 12)}」解析失败`, 'error');
                 return;
             }
-            const dlUrl = result.data.video_url_no_watermark || result.data.video_url;
+            const dlUrl = result.data.video_url?.startsWith('tw://')
+                ? result.data.video_url
+                : (result.data.video_url_no_watermark || result.data.video_url);
             await doDownload(dlUrl, v.title || result.data.title, result.data.platform || v.platform, button);
         } catch (err) {
             showToast(`解析失败: ${err.message}`, 'error');
@@ -1765,7 +1769,9 @@ async function fetchProfileVideoBlob(v) {
         });
         const result = await readJsonResponse(resp, '视频解析接口');
         if (!result.success || !result.data || !result.data.video_url) return null;
-        videoUrl = result.data.video_url_no_watermark || result.data.video_url;
+        videoUrl = result.data.video_url?.startsWith('tw://')
+            ? result.data.video_url
+            : (result.data.video_url_no_watermark || result.data.video_url);
         platform = result.data.platform || platform;
         title = v.title || result.data.title || title;
     }

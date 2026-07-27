@@ -365,7 +365,7 @@ async def download_video(
                 detail="TikTok 下载需要可访问 TikTok 的网络或代理，请配置代理地址后重试"
             )
 
-        def _download_with_ytdlp():
+        def _download_with_ytdlp(proxy: str = ""):
             import yt_dlp
 
             def _progress_hook(d):
@@ -385,11 +385,20 @@ async def download_video(
                 "fragment_retries": 3,
                 "extractor_retries": 2,
             }
-            proxy = get_active_proxy()
             if proxy:
                 ydl_opts["proxy"] = proxy
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([page_url])
+
+        # 代理尝试顺序：Twitter/YouTube/B站 直连优先、代理兜底（部分代理会破坏 x.com 的 SSL 握手）；
+        # TikTok 必须走代理（前面已做无代理快速失败）。
+        _active_proxy = get_active_proxy()
+        if platform_name == "TikTok":
+            proxy_attempts = [_active_proxy] if _active_proxy else [""]
+        else:
+            proxy_attempts = [""]
+            if _active_proxy:
+                proxy_attempts.append(_active_proxy)
 
         def _cleanup_partial():
             for f in DOWNLOAD_DIR.glob(f"{storage_title}.*"):
@@ -405,35 +414,47 @@ async def download_video(
                 try:
                     # 应用级重试：TikTok 等平台会概率性返回 403 反爬，重试即可成功。
                     # yt-dlp 原生 retries 覆盖不到 extract 阶段的 403，故在此补一层。
-                    for attempt in range(3):
+                    # 同时遍历 proxy_attempts（直连优先，代理兜底）
+                    for proxy in proxy_attempts:
                         if cancel_event.is_set():
                             break
-                        try:
-                            await asyncio.to_thread(_download_with_ytdlp)
-                            break
-                        except _DownloadCancelled:
-                            raise
-                        except Exception as e:
+                        for attempt in range(3):
                             if cancel_event.is_set():
+                                break
+                            try:
+                                await asyncio.to_thread(_download_with_ytdlp, proxy)
+                                break
+                            except _DownloadCancelled:
                                 raise
-                            _cleanup_partial()  # 清理残留分片再重试
-                            msg = str(e)
-                            transient = any(k in msg for k in (
-                                "403", "Forbidden", "Unable to download webpage",
-                                "timed out", "Read timed out", "Connection",
-                                "Temporary failure", "EOF", "500", "502", "503",
-                            ))
-                            if attempt < 2 and transient:
-                                logger.warning(
-                                    f"[下载] {platform_name} 第{attempt + 1}次失败({msg[:80]})，1.5s 后重试"
-                                )
-                                # 分片轮询而非固定 sleep，使重试等待期间也能即时响应取消
-                                for _ in range(15):
-                                    if cancel_event.is_set():
-                                        break
-                                    await asyncio.sleep(0.1)
-                                continue
-                            raise
+                            except Exception as e:
+                                if cancel_event.is_set():
+                                    raise
+                                _cleanup_partial()  # 清理残留分片再重试
+                                msg = str(e)
+                                transient = any(k in msg for k in (
+                                    "403", "Forbidden", "Unable to download webpage",
+                                    "timed out", "Read timed out", "Connection",
+                                    "Temporary failure", "EOF", "500", "502", "503",
+                                ))
+                                if attempt < 2 and transient:
+                                    logger.warning(
+                                        f"[下载] {platform_name} 第{attempt + 1}次失败(proxy={proxy or '直连'}, {msg[:80]})，1.5s 后重试"
+                                    )
+                                    for _ in range(15):
+                                        if cancel_event.is_set():
+                                            break
+                                        await asyncio.sleep(0.1)
+                                    continue
+                                # 非临时错误，跳出当前代理的重试
+                                break
+                        else:
+                            # 3 次都失败，尝试下一个代理配置
+                            continue
+                        # 内层 break 到达说明下载成功
+                        break
+                    else:
+                        # 所有代理配置都失败，抛异常
+                        raise HTTPException(status_code=502, detail=f"{platform_name} 下载失败: 所有代理配置均失败")
                 finally:
                     watcher.cancel()
             # 兜底：若 yt-dlp 吞掉了 hook 抛出的取消异常并正常返回，仍按取消处理
