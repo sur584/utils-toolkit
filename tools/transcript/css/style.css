@@ -1024,3 +1024,87 @@ body::before {
     gap: 8px;
 }
 .upload-submit-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ─── 已选文件列表 ─── */
+.file-list {
+    max-width: 740px;
+    margin: 14px auto 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.file-list-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+}
+.file-list-item .fli-icon { flex-shrink: 0; color: var(--text-secondary); display: flex; }
+.file-list-item .fli-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.file-list-item .fli-size { flex-shrink: 0; font-size: 12px; color: var(--text-secondary); }
+.file-list-item .fli-remove {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all .15s;
+}
+.file-list-item .fli-remove:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* ─── 上传多结果卡 ─── */
+.upload-results { display: flex; flex-direction: column; gap: 20px; }
+.upload-result-card .urc-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+.upload-result-card .urc-filename {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.upload-result-card .urc-status { flex-shrink: 0; font-size: 12px; color: var(--text-secondary); }
+.upload-result-card .urc-status.done { color: var(--accent); }
+.upload-result-card .urc-status.error { color: #ef4444; }
+.urc-progress-track {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border);
+    overflow: hidden;
+    margin: 8px 0;
+}
+.urc-progress-fill {
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width .3s;
+}

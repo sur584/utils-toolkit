@@ -97,7 +97,7 @@ async def _parse_url(url: str) -> Dict[str, Any]:
         logger.warning(f"[视频号] Yuanbao 解析失败，尝试 Worker")
 
     # 方案 2: Worker API（备用）
-    worker_task = asyncio.wait_for(_fetch_via_worker(url), timeout=12.0)
+    worker_task = asyncio.wait_for(_fetch_via_worker(url), timeout=30.0)
     try:
         worker_result = await worker_task
         if worker_result and worker_result.get("success"):

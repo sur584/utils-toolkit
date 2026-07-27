@@ -736,6 +736,30 @@ a { text-decoration: none; color: inherit; }
 
 <script>
 const recentUpdatesJson = [
+    {
+        date: '07.16',
+        title: '视频文案提取升级',
+        summary: '支持 TXT/SRT 双格式导出，GPU 自动检测。',
+        detail: '转录管线自动检测 GPU 加速，文案可导出为纯文本或带时间轴的 SRT 字幕。'
+    },
+    {
+        date: '07.16',
+        title: '抖音下载去水印',
+        summary: '修复抖音主页视频下载带水印问题，新增下载缓存定时清理。',
+        detail: ''
+    },
+    {
+        date: '07.15',
+        title: '新增小红书主页批量解析',
+        summary: '支持登录 Cookie 与游标抓全分页，批量解析主页作品。',
+        detail: '接入真实 user_posted 接口，可完整抓取分页内容。'
+    },
+    {
+        date: '07.15',
+        title: '抖音主页解析优化',
+        summary: '分页浏览、序号标记、下载失败可重试，稳定性提升。',
+        detail: '单页可打包 ZIP 下载，下载/预览接口直连绕过系统代理，吸收 CDN 瞬时 502。'
+    },
      {
         date: '06.24',
         title: '新增批量图片重命名',

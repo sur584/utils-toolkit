@@ -67,12 +67,12 @@
             </div>
             <div class="tab-panel" data-panel="upload" hidden>
                 <div id="uploadZone" class="upload-zone">
-                    <input type="file" id="fileInput" accept="video/*,audio/*" hidden>
+                    <input type="file" id="fileInput" accept="video/*,audio/*" multiple hidden>
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                    <p class="upload-hint">点击或拖拽文件到此处上传</p>
-                    <p class="upload-sub">支持 MP4/MOV/MKV 等视频，MP3/M4A/WAV 等音频，最大 500MB</p>
-                    <p id="fileName" class="file-name" hidden></p>
+                    <p class="upload-hint">点击或拖拽文件到此处上传（可多选）</p>
+                    <p class="upload-sub">支持 MP4/MOV/MKV 等视频，MP3/M4A/WAV 等音频，单个最大 500MB</p>
                 </div>
+                <ul id="fileList" class="file-list" hidden></ul>
                 <button id="uploadBtn" class="search-btn upload-submit-btn" disabled>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                     开始转文本
@@ -167,6 +167,9 @@
                 </div>
             </div>
         </div>
+
+        <!-- 上传多文件结果区域（逐卡堆叠，由 JS 动态生成） -->
+        <div id="uploadResults" class="upload-results"></div>
 
         <!-- 错误区域 -->
         <div id="errorArea" class="error-card" style="display:none">

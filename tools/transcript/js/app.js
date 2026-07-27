@@ -53,7 +53,8 @@
         progressPercent: $('#progressPercent'),
         fileInput: $('#fileInput'),
         uploadZone: $('#uploadZone'),
-        fileName: $('#fileName'),
+        fileList: $('#fileList'),
+        uploadResults: $('#uploadResults'),
         uploadBtn: $('#uploadBtn'),
         stepPills: $('.step-pills'),
     };
@@ -69,7 +70,9 @@
     var MAX_POLL = 150;
     var MAX_TOASTS = 5;
     var FETCH_TIMEOUT = 15000;
-    var selectedFile = null;
+    var MAX_FILE_MB = 500;
+    var selectedFiles = [];
+    var uploadRunning = false;
     var currentMode = 'link';
     var lastResult = null;
 
@@ -253,6 +256,41 @@
             try { document.execCommand('copy'); sel.removeAllRanges(); showToast('已复制到剪贴板', 'success'); }
             catch (e) { showToast('复制失败，请手动选择复制', 'error'); }
         }
+    }
+
+    // ─── 通用复制/下载（供上传多卡片复用） ───
+    async function copyText(text) {
+        text = text || '';
+        if (!text) { showToast('没有可复制的内容', 'error'); return; }
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast('已复制到剪贴板', 'success');
+        } catch (err) {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); showToast('已复制到剪贴板', 'success'); }
+            catch (e) { showToast('复制失败，请手动选择复制', 'error'); }
+            document.body.removeChild(ta);
+        }
+    }
+
+    function downloadText(filename, content) {
+        content = content || '';
+        if (!content) { showToast('没有可下载的内容', 'error'); return; }
+        var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('文件已下载', 'success');
     }
 
     // ─── Download ───────────────────────────
@@ -449,49 +487,228 @@
         });
     }
 
-    // ─── 文件选择 ───────────────────────────
-    function onFileSelected(file) {
-        if (!file) return;
-        selectedFile = file;
-        if (elements.fileName) {
-            elements.fileName.textContent = file.name + '  (' + (file.size / 1024 / 1024).toFixed(1) + 'MB)';
-            elements.fileName.hidden = false;
-        }
-        if (elements.uploadBtn) elements.uploadBtn.disabled = false;
+    // ─── 文件选择（多文件）───────────────────
+    function formatFileSize(bytes) {
+        return (bytes / 1024 / 1024).toFixed(1) + 'MB';
     }
 
-    // ─── 上传提交 ───────────────────────────
-    async function submitUpload() {
-        if (!selectedFile) { showToast('请先选择文件', 'error'); return; }
+    function addFiles(fileList) {
+        if (!fileList || !fileList.length) return;
+        var added = 0, rejected = 0;
+        for (var i = 0; i < fileList.length; i++) {
+            var f = fileList[i];
+            var type = f.type || '';
+            var isMedia = type.indexOf('video/') === 0 || type.indexOf('audio/') === 0 ||
+                /\.(mp4|mov|mkv|avi|flv|webm|m4v|ts|mts|3gp|wmv|mp3|m4a|wav|aac|flac|ogg|wma)$/i.test(f.name);
+            if (!isMedia) { rejected++; continue; }
+            if (f.size > MAX_FILE_MB * 1024 * 1024) {
+                showToast('“' + f.name + '” 超过 ' + MAX_FILE_MB + 'MB，已跳过', 'error');
+                continue;
+            }
+            // 去重：同名同大小视为同一文件
+            var dup = selectedFiles.some(function (s) { return s.name === f.name && s.size === f.size; });
+            if (dup) continue;
+            selectedFiles.push(f);
+            added++;
+        }
+        if (rejected) showToast('已跳过 ' + rejected + ' 个非音视频文件', 'error');
+        renderFileList();
+    }
 
+    function removeFile(index) {
+        selectedFiles.splice(index, 1);
+        renderFileList();
+    }
+
+    function renderFileList() {
+        var list = elements.fileList;
+        if (!list) return;
+        list.innerHTML = '';
+        if (!selectedFiles.length) {
+            list.hidden = true;
+            if (elements.uploadBtn) elements.uploadBtn.disabled = true;
+            return;
+        }
+        list.hidden = false;
+        selectedFiles.forEach(function (f, i) {
+            var li = document.createElement('li');
+            li.className = 'file-list-item';
+            li.innerHTML =
+                '<span class="fli-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>' +
+                '<span class="fli-name">' + escapeHtml(f.name) + '</span>' +
+                '<span class="fli-size">' + formatFileSize(f.size) + '</span>' +
+                '<button class="fli-remove" title="移除" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+            li.querySelector('.fli-remove').addEventListener('click', function () {
+                if (uploadRunning) { showToast('正在转写中，无法移除文件', 'error'); return; }
+                removeFile(i);
+            });
+            list.appendChild(li);
+        });
+        if (elements.uploadBtn) elements.uploadBtn.disabled = uploadRunning;
+    }
+
+    // ─── 上传提交（串行队列 + 逐卡结果）──────────
+    async function submitUpload() {
+        if (uploadRunning) return;
+        if (!selectedFiles.length) { showToast('请先选择文件', 'error'); return; }
+
+        // 上传流程使用独立的多卡容器，隐藏链接流程的单结果/进度/错误区
         resetUI();
-        showProgress();
         if (elements.stepPills) elements.stepPills.style.display = 'none';
-        setProcessing(true);
-        setProgress(5);
-        elements.statusMessage.textContent = '正在上传文件...';
+        elements.uploadResults.innerHTML = '';
+        uploadRunning = true;
+        elements.uploadBtn.disabled = true;
+        renderFileList();
+
+        var files = selectedFiles.slice();
+        var okCount = 0;
+        for (var i = 0; i < files.length; i++) {
+            var card = createUploadCard(files[i].name);
+            elements.uploadResults.appendChild(card);
+            try {
+                var data = await transcribeFile(files[i], card);
+                fillUploadCardResult(card, data, files[i].name);
+                okCount++;
+            } catch (err) {
+                setCardError(card, err.message || '转写失败');
+            }
+        }
+
+        uploadRunning = false;
+        elements.uploadBtn.disabled = false;
+        renderFileList();
+        showToast('已完成 ' + okCount + '/' + files.length + ' 个文件', okCount ? 'success' : 'error');
+    }
+
+    // 上传单个文件并轮询至完成，返回结果 data（Promise）
+    async function transcribeFile(file, card) {
+        setCardStatus(card, '正在上传...', '');
+        setCardProgress(card, 5);
 
         var fd = new FormData();
-        fd.append('file', selectedFile);
+        fd.append('file', file);
         fd.append('language', 'zh');
 
-        try {
-            var res = await fetch('/api/transcript/upload', { method: 'POST', body: fd });
-            var json = await res.json();
-            if (!res.ok || !json.success) {
-                var msg = (json && json.detail && json.detail.message) || (json && json.message) || ('上传失败 (' + res.status + ')');
-                throw new Error(msg);
-            }
-            var jobId = json.data && json.data.job_id;
-            if (!jobId) throw new Error('服务器未返回任务 ID');
-            elements.statusMessage.textContent = '文件已上传，正在处理...';
-            startTimer();
-            startPolling(jobId);
-        } catch (err) {
-            showError(err.message || '上传失败，请重试');
-            setProcessing(false);
+        var res = await fetch('/api/transcript/upload', { method: 'POST', body: fd });
+        var json = await res.json();
+        if (!res.ok || !json.success) {
+            var msg = (json && json.detail && json.detail.message) || (json && json.message) || ('上传失败 (' + res.status + ')');
+            throw new Error(msg);
         }
+        var jobId = json.data && json.data.job_id;
+        if (!jobId) throw new Error('服务器未返回任务 ID');
+
+        setCardStatus(card, '正在转写...', '');
+        return await pollJob(jobId, card);
     }
+
+    // 轮询单个 job，进度回写到卡片；完成 resolve(data)，失败 reject
+    function pollJob(jobId, card) {
+        return new Promise(function (resolve, reject) {
+            var count = 0;
+            function tick() {
+                fetchWithTimeout('/api/transcript/' + encodeURIComponent(jobId), null, 10000)
+                    .then(function (res) { return res.json(); })
+                    .then(function (json) {
+                        if (!json.success) throw new Error(json.message || '查询失败');
+                        var data = json.data;
+                        if (data.status === 'completed') { resolve(data); return; }
+                        if (data.status === 'failed') { reject(new Error(data.message || '转写失败')); return; }
+                        if (data.progress != null) setCardProgress(card, data.progress);
+                        if (data.message) setCardStatus(card, data.message, '');
+                        next();
+                    })
+                    .catch(function (err) {
+                        if (err.name === 'AbortError' || count <= 3) { next(); return; }
+                        reject(err);
+                    });
+            }
+            function next() {
+                count++;
+                if (count >= MAX_POLL) { reject(new Error('处理超时')); return; }
+                setTimeout(tick, document.hidden ? 5000 : 1200);
+            }
+            setTimeout(tick, 500);
+        });
+    }
+
+    // ─── 上传结果卡 ─────────────────────────
+    function createUploadCard(filename) {
+        var card = document.createElement('div');
+        card.className = 'result-card upload-result-card';
+        card.innerHTML =
+            '<div class="urc-header">' +
+            '<span class="urc-filename">' + escapeHtml(filename) + '</span>' +
+            '<span class="urc-status">排队中...</span>' +
+            '</div>' +
+            '<div class="urc-progress-track"><div class="urc-progress-fill"></div></div>' +
+            '<div class="urc-body"></div>';
+        return card;
+    }
+
+    function setCardStatus(card, text, cls) {
+        var el = card.querySelector('.urc-status');
+        if (el) { el.textContent = text; el.className = 'urc-status' + (cls ? ' ' + cls : ''); }
+    }
+
+    function setCardProgress(card, pct) {
+        var fill = card.querySelector('.urc-progress-fill');
+        if (fill) fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    }
+
+    function setCardError(card, message) {
+        setCardStatus(card, '失败', 'error');
+        setCardProgress(card, 0);
+        var track = card.querySelector('.urc-progress-track');
+        if (track) track.style.display = 'none';
+        var body = card.querySelector('.urc-body');
+        if (body) body.innerHTML = '<p class="error-message" style="text-align:left">' + escapeHtml(message) + '</p>';
+    }
+
+    function fillUploadCardResult(card, data, filename) {
+        setCardStatus(card, '完成', 'done');
+        setCardProgress(card, 100);
+        var track = card.querySelector('.urc-progress-track');
+        if (track) track.style.display = 'none';
+
+        var body = card.querySelector('.urc-body');
+        body.innerHTML =
+            '<div class="text-section">' +
+            '<div class="section-label">标题文案：</div>' +
+            '<div class="section-content title-content"></div>' +
+            '</div>' +
+            '<div class="text-section">' +
+            '<div class="section-label">视频文案：</div>' +
+            '<div class="transcript-box"><div class="transcript-text"></div></div>' +
+            '</div>' +
+            '<div class="export-bar">' +
+            '<div class="export-actions">' +
+            '<button class="btn btn-primary urc-copy"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>复制全文</button>' +
+            '<button class="btn btn-secondary urc-txt"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出 TXT</button>' +
+            '<button class="btn btn-secondary urc-srt"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出 SRT</button>' +
+            '</div>' +
+            '<div class="export-stats"><span>字数: <strong></strong></span><span>预计阅读: <strong></strong></span></div>' +
+            '</div>';
+
+        body.querySelector('.title-content').textContent = data.title || filename || '-';
+        body.querySelector('.transcript-text').innerHTML = formatTranscript(data.transcript || '');
+        var stats = body.querySelectorAll('.export-stats strong');
+        stats[0].textContent = data.char_count != null ? data.char_count.toLocaleString() : '0';
+        stats[1].textContent = estimateReadTime(data.char_count || 0);
+
+        var baseName = (data.title || filename || 'transcript').replace(/\.[^.]+$/, '');
+        var safeName = baseName.replace(/[\\/:*?"<>|]/g, '_').substring(0, 80);
+        var text = data.transcript || body.querySelector('.transcript-text').textContent || '';
+        var srt = data.srt || buildSrtFromText(text, data.duration || 0);
+
+        body.querySelector('.urc-copy').addEventListener('click', function () { copyText(text); });
+        body.querySelector('.urc-txt').addEventListener('click', function () { downloadText(safeName + '.txt', text); });
+        body.querySelector('.urc-srt').addEventListener('click', function () {
+            if (!srt) { showToast('没有可下载的内容', 'error'); return; }
+            downloadText(safeName + '.srt', srt);
+        });
+    }
+
 
     // ─── Polling ────────────────────────────
     function startPolling(jobId) {
@@ -699,12 +916,13 @@
             elements.uploadZone.addEventListener('drop', function (e) {
                 e.preventDefault();
                 elements.uploadZone.classList.remove('dragover');
-                if (e.dataTransfer.files && e.dataTransfer.files[0]) onFileSelected(e.dataTransfer.files[0]);
+                if (e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
             });
         }
         if (elements.fileInput) {
             elements.fileInput.addEventListener('change', function (e) {
-                if (e.target.files && e.target.files[0]) onFileSelected(e.target.files[0]);
+                if (e.target.files && e.target.files.length) addFiles(e.target.files);
+                elements.fileInput.value = '';
             });
         }
         if (elements.uploadBtn) elements.uploadBtn.addEventListener('click', submitUpload);
