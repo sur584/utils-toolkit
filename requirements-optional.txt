@@ -1,0 +1,4 @@
+# Optional: text-removal (inpainting) feature.
+# simple_lama_inpainting requires numpy<2 which has no prebuilt wheel on Python 3.13.
+# Install only on Python <=3.12, or with a C compiler available.
+simple_lama_inpainting>=0.1.0
