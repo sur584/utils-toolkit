@@ -161,4 +161,4 @@ if __name__ == "__main__":
         print(f"[WARN] 模型预加载失败（首次使用时会自动下载）: {e}")
 
     print("=" * 50 + "\n")
-    uvicorn.run("main:app", host="0.0.0.0", port=5001, log_level="info")
+    uvicorn.run("main:app", host=os.getenv("UT_HOST", "0.0.0.0"), port=5001, log_level="info")

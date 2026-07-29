@@ -75,6 +75,11 @@ def _detect_proxy() -> str:
 
 HTTP_PROXY = _detect_proxy()
 
+# ─── SSL 证书校验开关 ────────────────────────────────
+# 默认开启出站请求的证书校验。在 MITM 企业代理后等场景可设
+# UT_SSL_VERIFY=0 / false / no 关闭校验。
+SSL_VERIFY: bool = os.getenv("UT_SSL_VERIFY", "1").strip().lower() not in ("0", "false", "no")
+
 # ─── 运行时代理配置（通过前端设置，覆盖自动检测）────────
 # 用于客户端设备有代理但服务端无代理的场景
 # 格式: http://192.168.1.18:7890

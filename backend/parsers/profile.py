@@ -17,7 +17,7 @@ from urllib.parse import urlparse, urlsplit, parse_qs, quote
 import httpx
 
 from ._utils import _make_info, _empty_result, _ok, _follow_redirects
-from config import get_active_proxy
+from config import get_active_proxy, SSL_VERIFY
 from deps import ytdlp_semaphore
 from . import xhs_sign
 
@@ -216,7 +216,7 @@ async def _parse_profile_ytdlp(url: str, platform: str, limit: int, page: int = 
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
-            "nocheckcertificate": True,
+            "nocheckcertificate": not SSL_VERIFY,
             "extract_flat": "in_playlist",
             "playliststart": start,
             "playlistend": end,
@@ -513,7 +513,7 @@ async def _fetch_xhs_user_posted(
     sign_ret = await xhs_sign.sign(api, a1, "", "GET")
     headers = _xhs_headers(cookie, sign_ret)
 
-    async with httpx.AsyncClient(timeout=15.0, verify=False, trust_env=False) as client:
+    async with httpx.AsyncClient(timeout=15.0, verify=SSL_VERIFY, trust_env=False) as client:
         r = await client.get(_XHS_HOST + api, headers=headers)
 
     if r.status_code != 200:

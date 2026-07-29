@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from parsers import parse_link, batch_parse
 from parsers._utils import _is_safe_url, _extract_url
 
-from config import DOWNLOAD_DIR, get_active_proxy
+from config import DOWNLOAD_DIR, get_active_proxy, SSL_VERIFY
 from deps import (
     ParseRequest, BatchParseRequest, ParseProfileRequest,
     _get_client_ip, _add_to_history, ytdlp_semaphore,
@@ -67,7 +67,7 @@ async def _fetch_upstream(url: str, headers: dict, timeout: float = 60, max_retr
     for attempt in range(max_retries):
         for via_proxy in (False, True):
             try:
-                kwargs = dict(timeout=timeout, verify=False, follow_redirects=True)
+                kwargs = dict(timeout=timeout, verify=SSL_VERIFY, follow_redirects=True)
                 if via_proxy:
                     proxy = get_active_proxy()
                     if not proxy:
@@ -175,7 +175,7 @@ async def tiktok_oembed(url: str = Query(...)):
         raise HTTPException(status_code=400, detail="仅支持 TikTok 链接")
     try:
         proxy = get_active_proxy()
-        client_kwargs = dict(timeout=15, verify=False, follow_redirects=True)
+        client_kwargs = dict(timeout=15, verify=SSL_VERIFY, follow_redirects=True)
         if proxy:
             client_kwargs["proxies"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as client:
@@ -379,7 +379,7 @@ async def download_video(
                 "outtmpl": str(filepath),
                 "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                 "merge_output_format": "mp4",
-                "nocheckcertificate": True,
+                "nocheckcertificate": not SSL_VERIFY,
                 "progress_hooks": [_progress_hook],
                 "retries": 3,
                 "fragment_retries": 3,
@@ -506,7 +506,7 @@ async def download_video(
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": "https://channels.weixin.qq.com/",
             }
-            async with httpx.AsyncClient(timeout=120, verify=False, follow_redirects=True, trust_env=False) as client:
+            async with httpx.AsyncClient(timeout=120, verify=SSL_VERIFY, follow_redirects=True, trust_env=False) as client:
                 async with client.stream("GET", actual_url, headers=headers) as resp:
                     if resp.status_code != 200:
                         raise HTTPException(status_code=502, detail=f"微信视频下载失败 (HTTP {resp.status_code})")
@@ -748,7 +748,7 @@ async def set_proxy_config(req: ProxyConfigRequest):
 
 async def _test_client_proxy(proxy: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=4, verify=False, proxies=proxy) as client:
+        async with httpx.AsyncClient(timeout=4, verify=SSL_VERIFY, proxies=proxy) as client:
             resp = await client.get(
                 "https://www.tiktok.com/oembed",
                 params={"url": "https://www.tiktok.com/@tiktok/video/7106594312292453678"},

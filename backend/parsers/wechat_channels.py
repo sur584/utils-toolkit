@@ -12,6 +12,7 @@ from urllib.parse import urlparse, parse_qs, quote
 
 import httpx
 
+from config import SSL_VERIFY
 from ._utils import _make_info, _empty_result, _ok
 
 YUANBAO_COOKIE = os.environ.get("YUANBAO_COOKIE", "")
@@ -120,7 +121,7 @@ async def _parse_url(url: str) -> Dict[str, Any]:
 async def _fetch_via_yuanbao(url: str) -> Optional[Dict[str, Any]]:
     """Yuanbao 两步解析：Step1 获取 token/eid → Step2 获取视频 URL"""
     try:
-        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+        async with httpx.AsyncClient(timeout=15.0, verify=SSL_VERIFY) as client:
             # Step 1: Yuanbao API → playable_url
             payload = {'type': 'video_channel_url', 'url': url, 'scene': 1}
             headers = {
@@ -277,7 +278,7 @@ def _extract_video_id(url: str) -> Optional[str]:
 async def _fetch_via_worker(url: str) -> Optional[Dict[str, Any]]:
     """通过 Worker API 获取视频直链和元数据（备用方案）"""
     try:
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY) as client:
             resp = await client.post(
                 WORKER_API,
                 json={'url': url},
@@ -347,7 +348,7 @@ async def _get_feed_info_short(video_id: str) -> Optional[dict]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+        async with httpx.AsyncClient(timeout=15.0, verify=SSL_VERIFY) as client:
             await client.get(
                 f'https://channels.weixin.qq.com/finder-preview/pages/sph?id={video_id}',
                 headers={'User-Agent': UA}

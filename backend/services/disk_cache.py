@@ -65,8 +65,8 @@ class DiskCache:
         try:
             for f in self.images_dir.glob("*.png"):
                 total += f.stat().st_size
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"缓存目录大小统计失败: {e}")
         return total
 
     def get(self, key: str) -> Optional[bytes]:
@@ -96,8 +96,8 @@ class DiskCache:
                     with self._lock:
                         self._stats["misses"] += 1
                     return None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"缓存 TTL 检查失败: {e}")
 
         # 更新访问时间
         with self._lock:
@@ -141,12 +141,12 @@ class DiskCache:
             try:
                 old = json.loads(meta_path.read_text(encoding="utf-8"))
                 meta["created"] = old.get("created", meta["created"])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"缓存元数据读取失败: {e}")
         try:
             meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"缓存元数据写入失败: {e}")
 
     def _remove(self, h: str):
         try:
@@ -156,8 +156,8 @@ class DiskCache:
                 img_path.unlink()
             if meta_path.exists():
                 meta_path.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"缓存删除失败: {e}")
 
     def _evict_if_needed(self):
         try:

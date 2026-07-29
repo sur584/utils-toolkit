@@ -3,6 +3,8 @@
 import re
 from typing import Dict, Any
 
+from config import SSL_VERIFY
+
 from ._utils import _make_info, _empty_result, _ok
 
 
@@ -21,7 +23,7 @@ async def parse(url: str) -> Dict[str, Any]:
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "nocheckcertificate": True,
+            "nocheckcertificate": not SSL_VERIFY,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)

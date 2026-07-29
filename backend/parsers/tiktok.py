@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional
 import httpx
 
 from ._utils import _follow_redirects, _make_info, _empty_result, _ok
-from config import get_active_proxy
+from config import get_active_proxy, SSL_VERIFY
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ async def _tt_fetch(url: str, mobile: bool = True) -> Optional[str]:
     try:
         proxy = get_active_proxy()
         timeout = 8 if not proxy else 20
-        client_kwargs = dict(timeout=timeout, verify=False, follow_redirects=False)
+        client_kwargs = dict(timeout=timeout, verify=SSL_VERIFY, follow_redirects=False)
         if proxy:
             client_kwargs["proxies"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as c:
@@ -81,7 +81,7 @@ async def _parse_via_ytdlp(video_id: str, username: str) -> Optional[Dict[str, A
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
-            "nocheckcertificate": True,
+            "nocheckcertificate": not SSL_VERIFY,
             "socket_timeout": timeout,
             "http_headers": _tt_headers(mobile=False, lang="en"),
         }
@@ -130,7 +130,7 @@ async def _parse_via_ytdlp(video_id: str, username: str) -> Optional[Dict[str, A
 async def _parse_via_oembed(url: str) -> Optional[Dict[str, Any]]:
     try:
         proxy = get_active_proxy()
-        client_kwargs = dict(timeout=15, verify=False, follow_redirects=True)
+        client_kwargs = dict(timeout=15, verify=SSL_VERIFY, follow_redirects=True)
         if proxy:
             client_kwargs["proxies"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as client:

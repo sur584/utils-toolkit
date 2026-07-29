@@ -32,6 +32,9 @@ settings = load_settings()
 
 # ─── Job Store ────────────────────────────────────
 _jobs: Dict[str, dict] = {}
+
+# 保持对 fire-and-forget 后台任务的引用，避免被 GC 提前回收
+_background_tasks: set = set()
 JOB_TTL = 1800  # 30 minutes
 MAX_JOBS = 100
 ALLOWED_UPLOAD_EXT = {
@@ -235,7 +238,9 @@ async def submit_transcript(req: TranscriptRequest):
         "created_at": time.time(),
     }
 
-    asyncio.create_task(_run_job(job_id, req))
+    task = asyncio.create_task(_run_job(job_id, req))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return _make_response(True, "任务已提交", {
         "job_id": job_id,
@@ -347,7 +352,9 @@ async def upload_transcript(file: UploadFile = File(...), language: str = Form("
         "created_at": time.time(),
     }
 
-    asyncio.create_task(_run_upload_job(job_id, file_path, filename, language, tmp_dir))
+    task = asyncio.create_task(_run_upload_job(job_id, file_path, filename, language, tmp_dir))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return _make_response(True, "文件已上传", {"job_id": job_id, "status": "processing"})
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import httpx
 
-from config import get_active_proxy
+from config import get_active_proxy, SSL_VERIFY
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +143,7 @@ class DownloadService:
                 "outtmpl": str(filepath),
                 "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                 "merge_output_format": "mp4",
-                "nocheckcertificate": True,
+                "nocheckcertificate": not SSL_VERIFY,
             }
             if platform_key == "tt://":
                 proxy = get_active_proxy(client_only=True)
@@ -214,7 +214,7 @@ class DownloadService:
                 "Referer": "https://channels.weixin.qq.com/",
             }
             async with httpx.AsyncClient(
-                timeout=120, verify=False, follow_redirects=True
+                timeout=120, verify=SSL_VERIFY, follow_redirects=True
             ) as client:
                 resp = await client.get(actual_url, headers=headers)
                 if resp.status_code != 200:
@@ -280,7 +280,7 @@ class DownloadService:
                 "Referer": referer or "https://www.douyin.com/",
             }
             async with httpx.AsyncClient(
-                timeout=120, verify=False, follow_redirects=True
+                timeout=120, verify=SSL_VERIFY, follow_redirects=True
             ) as client:
                 resp = await client.get(video_url, headers=headers)
                 if resp.status_code != 200:

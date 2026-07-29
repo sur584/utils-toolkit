@@ -14,6 +14,9 @@ import argparse
 # 切换到脚本所在目录
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+# 服务绑定地址：默认 0.0.0.0（局域网可访问）；设 UT_HOST=127.0.0.1 可仅限本机
+HOST = os.getenv("UT_HOST", "0.0.0.0")
+
 
 def check_and_install_deps():
     """检查并安装依赖（核心依赖必须，其余可选）"""
@@ -195,7 +198,7 @@ def find_free_port(start_port):
     for port in range(start_port, start_port + 10):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.bind(('0.0.0.0', port))
+            s.bind((HOST, port))
             s.close()
             return port
         except OSError:
@@ -229,7 +232,7 @@ def start_server(port):
     """启动 FastAPI 服务"""
     try:
         import uvicorn
-        uvicorn.run("backend.main:app", host="0.0.0.0", port=port, log_level="info")
+        uvicorn.run("backend.main:app", host=HOST, port=port, log_level="info")
     except OSError as e:
         if 'Address already in use' in str(e) or '10048' in str(e):
             print(f'[ERROR] 端口 {port} 已被占用！')

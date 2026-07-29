@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from config import get_active_proxy
+from config import get_active_proxy, SSL_VERIFY
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ def _make_info(**kwargs) -> Dict[str, Any]:
 
 
 async def _follow_redirects(url: str, timeout: float = 10.0) -> str:
-    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, verify=False) as c:
+    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, verify=SSL_VERIFY) as c:
         r = await c.get(url, headers=_headers())
         count = 0
         while r.is_redirect and count < 10:
@@ -69,7 +69,7 @@ async def _fetch(
 ) -> Optional[str]:
     try:
         proxy = get_active_proxy()
-        client_kwargs = dict(timeout=timeout, verify=False, follow_redirects=follow)
+        client_kwargs = dict(timeout=timeout, verify=SSL_VERIFY, follow_redirects=follow)
         if use_proxy and proxy:
             client_kwargs["proxies"] = proxy
         if not use_proxy:

@@ -5,6 +5,7 @@ from typing import Dict, Any
 
 import httpx
 
+from config import SSL_VERIFY
 from ._utils import _headers, _follow_redirects, _make_info, _empty_result, _ok
 
 
@@ -24,7 +25,7 @@ async def parse(url: str) -> Dict[str, Any]:
     api = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
     headers = _headers(referer="https://www.bilibili.com/")
     try:
-        async with httpx.AsyncClient(timeout=15, verify=False) as c:
+        async with httpx.AsyncClient(timeout=15, verify=SSL_VERIFY) as c:
             r = await c.get(api, headers=headers)
             data = r.json()
     except Exception:
@@ -41,7 +42,7 @@ async def parse(url: str) -> Dict[str, Any]:
 
     play_api = f"https://api.bilibili.com/x/player/playurl?bvid={bvid}&cid={cid}&qn=80&fnval=1"
     try:
-        async with httpx.AsyncClient(timeout=15, verify=False) as c:
+        async with httpx.AsyncClient(timeout=15, verify=SSL_VERIFY) as c:
             r = await c.get(play_api, headers=headers)
             play_data = r.json()
     except Exception:

@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Tuple, Optional
 
 import httpx
 
+from config import SSL_VERIFY
 from ._utils import _headers, _fetch, _follow_redirects, _make_info, _empty_result, _ok, DESKTOP_UA
 from ._abogus import get_a_bogus
 
@@ -143,7 +144,7 @@ async def _fetch_aweme_detail(video_id: str, cookie: str = "") -> Optional[dict]
             "Cookie": cookie_header,
         }
         # trust_env=False：抖音国内直连，禁走系统代理（否则易被判异常流量 / 502）
-        async with httpx.AsyncClient(timeout=15.0, verify=False, trust_env=False) as c:
+        async with httpx.AsyncClient(timeout=15.0, verify=SSL_VERIFY, trust_env=False) as c:
             return await c.get(_DETAIL_API, params=params, headers=headers)
 
     try:
@@ -331,7 +332,7 @@ async def _get_ttwid(force_refresh: bool = False) -> str:
             "cbUrlProtocol": "https", "union": True,
         }
         try:
-            async with httpx.AsyncClient(timeout=10.0, verify=False, trust_env=False) as c:
+            async with httpx.AsyncClient(timeout=10.0, verify=SSL_VERIFY, trust_env=False) as c:
                 r = await c.post(
                     "https://ttwid.bytedance.com/ttwid/union/register/",
                     json=payload,
@@ -403,7 +404,7 @@ async def fetch_user_post_list(
             "Cookie": cookie_header,
         }
         # trust_env=False：抖音国内直连，禁走代理，否则被判异常流量
-        async with httpx.AsyncClient(timeout=15.0, verify=False, trust_env=False) as c:
+        async with httpx.AsyncClient(timeout=15.0, verify=SSL_VERIFY, trust_env=False) as c:
             return await c.get(_POST_LIST_API, params=params, headers=headers)
 
     r = await _once(force_refresh=False)

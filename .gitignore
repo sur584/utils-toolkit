@@ -60,3 +60,6 @@ assets/
 .env
 *.env
 .env.local
+
+# WorkBuddy agent workspace data (local only)
+.workbuddy/

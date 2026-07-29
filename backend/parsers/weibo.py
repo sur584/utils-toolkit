@@ -5,6 +5,7 @@ from typing import Dict, Any
 
 import httpx
 
+from config import SSL_VERIFY
 from ._utils import _headers, _fetch, _make_info, _empty_result, _ok
 
 
@@ -24,7 +25,7 @@ async def parse(url: str) -> Dict[str, Any]:
 
     api = f"https://m.weibo.cn/api/container/getIndex?containerid=231248{vid}"
     try:
-        async with httpx.AsyncClient(timeout=15, verify=False) as c:
+        async with httpx.AsyncClient(timeout=15, verify=SSL_VERIFY) as c:
             r = await c.get(api, headers=_headers(referer="https://m.weibo.cn/", mobile=True))
             data = r.json()
     except Exception:

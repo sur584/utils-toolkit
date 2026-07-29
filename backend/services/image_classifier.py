@@ -37,9 +37,14 @@ class ImageClassifier:
 
         try:
             import urllib.request
-            urllib.request.urlretrieve(self.MODEL_URL, str(self._model_path))
+            tmp_path = self._model_path.with_suffix(".tmp")
+            urllib.request.urlretrieve(self.MODEL_URL, str(tmp_path))
+            os.replace(tmp_path, self._model_path)
             logger.info("MobileNetV3 模型下载完成")
         except Exception as e:
+            tmp_path = self._model_path.with_suffix(".tmp")
+            if tmp_path.exists():
+                tmp_path.unlink()
             logger.error(f"MobileNetV3 模型下载失败: {e}")
             raise RuntimeError(f"分类模型下载失败: {e}")
 

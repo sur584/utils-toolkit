@@ -10,6 +10,7 @@ router = APIRouter()
 
 
 @router.get("/api/history")
+@router.get("/api/history/list")
 async def get_history(request: Request, limit: int = Query(50, ge=1, le=200)):
     ip = _get_client_ip(request)
     return {"history": _load_history(ip)[:limit]}
