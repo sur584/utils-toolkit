@@ -736,16 +736,16 @@ function RenameConvertPanel(){
   };
   const targetIds=new Set(targets.map(i=>i.id));const usedNames=new Set(images.filter(i=>!targetIds.has(i.id)).map(i=>i.name));
   const previewNames=new Map();targets.forEach((img,i)=>previewNames.set(img.id,dedupeName(makeRawName(img,i),usedNames)));
-  const convertFile=(file,mime)=>new Promise(async(resolve,reject)=>{
+  const convertFile=(file,mime)=>new Promise((resolve,reject)=>{
     let bmp=null;
-    try{
-      bmp=await createImageBitmap(file);
+    createImageBitmap(file).then(loaded=>{
+      bmp=loaded;
       const canvas=document.createElement('canvas');canvas.width=bmp.width;canvas.height=bmp.height;
       const ctx=canvas.getContext('2d');
       if(mime==='image/jpeg'){ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height)}
       ctx.drawImage(bmp,0,0);
       canvas.toBlob(b=>b?resolve(b):reject(new Error('canvas toBlob failed')),mime,mime==='image/png'?undefined:quality);
-    }catch(e){reject(e)}finally{if(bmp)bmp.close()}
+    }).catch(reject).finally(()=>{if(bmp)bmp.close()});
   });
   const apply=async()=>{
     if(!targets.length)return;setProc(true);

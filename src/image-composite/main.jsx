@@ -697,6 +697,8 @@ const PreviewModal=()=>{
       return url?{url,name:item.product.name,idx:i}:null;
     })).then(results=>{
       if(!cancelled){const list=results.filter(Boolean);thumbRef.current=list;setThumbnails(list);setGenerating(false)}
+    }).catch(err=>{
+      if(!cancelled){console.error('preview thumbnails failed',err);toast('预览缩略图生成失败：'+(err&&err.message||err),'err');setGenerating(false)}
     });
     return()=>{cancelled=true};
   },[showPreview,bg,listKey]);
@@ -706,7 +708,7 @@ const PreviewModal=()=>{
     let cancelled=false;
     const oldUrl=viewUrl;
     const item=previewList[viewIdx];
-    previewComposite(item.product,item.placement).then(u=>{if(!cancelled){if(oldUrl)URL.revokeObjectURL(oldUrl);setViewUrl(u)}});
+    previewComposite(item.product,item.placement).then(u=>{if(!cancelled){if(oldUrl)URL.revokeObjectURL(oldUrl);setViewUrl(u)}}).catch(err=>{if(!cancelled){console.error('preview composite failed',err);toast('预览大图生成失败：'+(err&&err.message||err),'err')}});
     return()=>{cancelled=true};
   },[viewIdx,listKey]);
   if(!showPreview)return null;
