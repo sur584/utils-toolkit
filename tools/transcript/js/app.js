@@ -57,6 +57,11 @@
         uploadResults: $('#uploadResults'),
         uploadBtn: $('#uploadBtn'),
         stepPills: $('.step-pills'),
+        youtubeOptions: $('#youtubeOptions'),
+        subtitleLang: $('#subtitleLang'),
+        detectSubsBtn: $('#detectSubsBtn'),
+        subLangHint: $('#subLangHint'),
+        cookiePath: $('#cookiePath'),
     };
 
     // ─── State ───────────────────────────────
@@ -80,6 +85,93 @@
     function extractUrl(text) {
         var m = text.match(/https?:\/\/[^\s<>"')\]]+/);
         return m ? m[0] : null;
+    }
+
+    // ─── YouTube 专属逻辑 ─────────────────
+    function isYouTubeUrl(text) {
+        var url = extractUrl(text || '');
+        if (!url) return false;
+        try {
+            var host = new URL(url).hostname.toLowerCase();
+            return host.indexOf('youtube.com') !== -1 || host.indexOf('youtu.be') !== -1 || host.indexOf('youtube-nocookie.com') !== -1;
+        } catch (e) { return false; }
+    }
+
+    function updateYouTubeOptions() {
+        if (!elements.youtubeOptions) return;
+        if (isYouTubeUrl(elements.urlInput.value)) {
+            elements.youtubeOptions.style.display = '';
+        } else {
+            elements.youtubeOptions.style.display = 'none';
+            if (elements.subtitleLang) elements.subtitleLang.innerHTML = '<option value="">自动（推荐）</option>';
+            if (elements.subLangHint) elements.subLangHint.textContent = '';
+        }
+    }
+
+    // 常用字幕语言白名单（7 种）
+    var SUBTITLE_LANG_WHITELIST = [
+        { code: 'zh-Hans', name: '简体中文' },
+        { code: 'zh-Hant', name: '繁體中文' },
+        { code: 'en',     name: 'English' },
+        { code: 'ja',     name: '日本語' },
+        { code: 'ko',     name: '한국어' },
+        { code: 'es',     name: 'Español' },
+        { code: 'fr',     name: 'Français' },
+    ];
+
+    function populateSubtitleLang(tracks, defaultLang) {
+        var sel = elements.subtitleLang;
+        if (!sel) return;
+        // 构建可用轨道的 code→kind 映射
+        var available = {};
+        (tracks || []).forEach(function (t) { available[t.code] = t.kind; });
+        // 始终从白名单渲染，标记哪些实际可用
+        sel.innerHTML = '<option value="">自动（推荐）</option>';
+        SUBTITLE_LANG_WHITELIST.forEach(function (item) {
+            var opt = document.createElement('option');
+            opt.value = item.code;
+            opt.textContent = item.name;
+            var kind = available[item.code];
+            if (kind) {
+                opt.textContent += kind === 'auto' ? ' ✓（自动）' : ' ✓（人工）';
+            } else {
+                opt.textContent += ' （该视频无此字幕）';
+                opt.disabled = true;
+                opt.style.opacity = '0.5';
+            }
+            if (item.code === defaultLang) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    async function detectSubs() {
+        if (!elements.detectSubsBtn) return;
+        var raw = elements.urlInput.value.trim();
+        var url = extractUrl(raw);
+        if (!url) { showToast('请先粘贴 YouTube 链接', 'error'); return; }
+        elements.detectSubsBtn.disabled = true;
+        elements.detectSubsBtn.innerHTML = '<span class="spinner"></span> 检测中';
+        if (elements.subLangHint) elements.subLangHint.textContent = '正在列举可用字幕...';
+        try {
+            var q = '/api/transcript/youtube/subs?url=' + encodeURIComponent(url);
+            var cookie = (elements.cookiePath && elements.cookiePath.value || '').trim();
+            if (cookie) q += '&cookies_path=' + encodeURIComponent(cookie);
+            var res = await fetchWithTimeout(q, null, 20000);
+            var json = await res.json();
+            if (!res.ok || !json.success) throw new Error(json.message || '检测失败');
+            var data = json.data || {};
+            populateSubtitleLang(data.tracks, data.default_lang);
+            if (elements.subLangHint) {
+                elements.subLangHint.textContent = (data.tracks && data.tracks.length)
+                    ? ('共 ' + data.tracks.length + ' 种字幕，已自动选择推荐语言')
+                    : '该视频未检测到字幕，将使用语音识别';
+            }
+        } catch (err) {
+            if (elements.subLangHint) elements.subLangHint.textContent = '检测失败：' + (err.message || '未知错误');
+        } finally {
+            elements.detectSubsBtn.disabled = false;
+            elements.detectSubsBtn.textContent = '检测可用字幕';
+        }
     }
 
     // ─── Theme ──────────────────────────────
@@ -448,10 +540,15 @@
         elements.statusMessage.textContent = '正在提交任务...';
 
         try {
+            var body = {
+                url: url,
+                preferred_lang: (elements.subtitleLang ? elements.subtitleLang.value : '') || '',
+                cookies_path: (elements.cookiePath ? elements.cookiePath.value : '').trim(),
+            };
             var res = await fetchWithTimeout('/api/transcript', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url })
+                body: JSON.stringify(body)
             }, 10000);
             var json = await res.json();
             if (!res.ok || !json.success) {
@@ -857,6 +954,18 @@
         if (charCountStat) charCountStat.textContent = data.char_count != null ? data.char_count.toLocaleString() : '0';
         if (readTime) readTime.textContent = estimateReadTime(data.char_count || 0);
 
+        // 显示字幕语言（仅 YouTube 字幕提取时有）
+        var subLangCell = document.getElementById('subLangCell');
+        var videoSubLang = document.getElementById('videoSubLang');
+        if (subLangCell && videoSubLang) {
+            if (data.subtitle_lang) {
+                subLangCell.style.display = '';
+                videoSubLang.textContent = data.subtitle_lang;
+            } else {
+                subLangCell.style.display = 'none';
+            }
+        }
+
         // Highlight matching platform icon
         highlightPlatform(data.platform);
 
@@ -874,6 +983,7 @@
         elements.themeToggle.addEventListener('click', toggleTheme);
         elements.pasteBtn.addEventListener('click', pasteFromClipboard);
         elements.submitBtn.addEventListener('click', submitUrl);
+        if (elements.detectSubsBtn) elements.detectSubsBtn.addEventListener('click', detectSubs);
         elements.copyBtn.addEventListener('click', copyToClipboard);
         elements.downloadBtn.addEventListener('click', downloadAsTxt);
         if (elements.downloadSrtBtn) elements.downloadSrtBtn.addEventListener('click', downloadAsSrt);
@@ -884,6 +994,7 @@
         elements.urlInput.addEventListener('input', function () {
             this.style.height = 'auto';
             this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+            updateYouTubeOptions();
         });
 
         elements.urlInput.addEventListener('keydown', function (e) {
@@ -899,7 +1010,12 @@
                         elements.urlInput.value = url;
                         showToast('已自动提取链接', 'success', 1500);
                     }
-                    submitUrl();
+                    if (isYouTubeUrl(url)) {
+                        updateYouTubeOptions();
+                        detectSubs();
+                    } else {
+                        submitUrl();
+                    }
                 }
             }, 100);
         });

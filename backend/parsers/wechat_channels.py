@@ -47,12 +47,32 @@ FEED_INFO_API = 'https://channels.weixin.qq.com/finder-preview/api/feed/get_feed
 
 
 def _parse_count(s) -> int:
+    """解析微信视频号返回的点赞/评论/转发数，绝不抛出异常。
+
+    微信计数格式可能带单位与后缀，例如：
+      '1234'、'10,000'、'1.2万'、'10万+'、'3.5亿'、'10+'、''、None
+    统一清洗为整型；无法解析时返回 0。
+    """
     if not s:
         return 0
     s = str(s).strip()
-    # 视频号格式化字段可能为 '10+万' / '10万' / '10+' / '1,234' 等形式
-    multiplier = 10000 if '万' in s else 1
-    s = s.replace('万', '').replace('+', '').replace(',', '').strip()
+    if not s:
+        return 0
+
+    # 数量单位 → 倍率（优先匹配更大的单位）
+    multiplier = 1
+    if '亿' in s:
+        multiplier = 100_000_000
+        s = s.replace('亿', '')
+    elif 'w' in s.lower():
+        multiplier = 10_000
+        s = s.replace('w', '').replace('W', '')
+    elif '万' in s:
+        multiplier = 10_000
+        s = s.replace('万', '')
+
+    # 去除 '+'、逗号及所有非数字/小数点字符
+    s = re.sub(r'[^0-9.]', '', s)
     if not s:
         return 0
     try:
