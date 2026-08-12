@@ -34,6 +34,8 @@ async def extract_transcript(
     asr_model: str = "auto",
     language: str = "zh",
     api_key: str = "",
+    preferred_lang: str = "",
+    cookies_path: str = "",
     progress_callback: Optional[Callable] = None,
 ) -> dict:
     """
@@ -77,7 +79,10 @@ async def extract_transcript(
         return result
 
     # 其他平台：使用 yt-dlp
-    result = await _extract_ytdlp(url, platform, method, language, settings, progress)
+    result = await _extract_ytdlp(
+        url, platform, method, language, settings, progress,
+        preferred_lang=preferred_lang, cookies_path=cookies_path,
+    )
     cache_put(url, result)
     return result
 
@@ -416,7 +421,8 @@ async def extract_transcript_from_file(
 
 
 async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
-                         language: str, settings, progress_cb) -> dict:
+                         language: str, settings, progress_cb,
+                         preferred_lang: str = "", cookies_path: str = "") -> dict:
     """其他平台的 yt-dlp 提取流程"""
     async def progress(step, pct, msg):
         if progress_cb:
@@ -430,11 +436,15 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
     # 否则回退到后端统一配置（YT_COOKIES_FILE / YT_COOKIES_FROM_BROWSER / Windows 默认 chrome），
     # 二者都是为规避 YouTube 的 "Sign in to confirm you're not a bot" 校验。
     cookie_args: list = []
-    user_cp = load_cloud_config().cookies_path
-    if user_cp and Path(user_cp).exists():
-        cookie_args = ["--cookies", user_cp]
+    # Cookie 优先级：本次请求携带的 cookies_path > 全局 transcript 配置 > 后端统一代理/cookie 配置
+    if cookies_path and Path(cookies_path).exists():
+        cookie_args = ["--cookies", cookies_path]
     else:
-        cookie_args = resolve_cookie_cli_args()
+        user_cp = load_cloud_config().cookies_path
+        if user_cp and Path(user_cp).exists():
+            cookie_args = ["--cookies", user_cp]
+        else:
+            cookie_args = resolve_cookie_cli_args()
 
     # Step 2: 获取视频信息
     await progress("parsing", 15, "正在获取视频信息...")
@@ -457,7 +467,9 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
         await progress("subtitles", 25, "正在尝试获取平台字幕...")
         async with temp_workspace() as tmp:
             try:
-                sub_file = await download_subtitles(url, str(tmp), ytdlp, cookie_args=cookie_args)
+                sub_file = await download_subtitles(
+                    url, str(tmp), ytdlp, cookie_args=cookie_args, lang=preferred_lang
+                )
                 if sub_file:
                     await progress("subtitles", 40, "正在解析字幕文件...")
                     content = sub_file.read_text(encoding="utf-8-sig")
