@@ -8,16 +8,16 @@ from typing import Dict, Any
 from ._utils import DESKTOP_UA, _headers, _fetch, _follow_redirects, _make_info, _empty_result, _ok
 
 
-DOMAINS = ["xiaohongshu.com", "xhslink.com", "www.xiaohongshu.com"]
+DOMAINS = ["xiaohongshu.com", "xhslink.com", "xhslink.cn", "www.xiaohongshu.com"]
 
 
-async def parse(url: str) -> Dict[str, Any]:
+async def parse(url: str, cookie: str = "") -> Dict[str, Any]:
     url = url.rstrip("/")
     parsed = urlparse(url)
-    if "xhslink.com" in parsed.netloc:
+    if "xhslink.com" in parsed.netloc or "xhslink.cn" in parsed.netloc:
         url = await _follow_redirects(url)
 
-    m = re.search(r"/explore/(\w+)", url) or re.search(r"/discovery/item/(\w+)", url)
+    m = re.search(r"/explore/(\w+)", url) or re.search(r"/discovery/item/(\w+)", url) or re.search(r"/note/(\w+)", url)
     if not m:
         parts = urlparse(url).path.strip("/").split("/")
         m_val = parts[-1] if len(parts) > 1 else None
@@ -33,6 +33,8 @@ async def parse(url: str) -> Dict[str, Any]:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-CN,zh;q=0.9",
     }
+    if cookie:
+        headers["Cookie"] = cookie
     html = await _fetch(url, headers=headers)
     if not html:
         return _empty_result("获取小红书页面失败")

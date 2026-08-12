@@ -17,6 +17,7 @@ from parsers import parse_link, batch_parse
 from parsers._utils import _is_safe_url, _extract_url
 
 from config import DOWNLOAD_DIR, get_active_proxy, SSL_VERIFY
+from ytdlp_cookies import get_ytdlp_cookie_opts, get_youtube_extractor_args, is_cookie_related_error
 from deps import (
     ParseRequest, BatchParseRequest, ParseProfileRequest,
     _get_client_ip, _add_to_history, ytdlp_semaphore,
@@ -55,39 +56,48 @@ class _UpstreamError(Exception):
     """上游（视频/CDN）拉取失败，用于在上层映射为 502。"""
 
 
-async def _fetch_upstream(url: str, headers: dict, timeout: float = 60, max_retries: int = 2):
-    """拉取上游二进制内容（优先直连，失败再走代理兜底）。
+async def _open_proxy_stream(url: str, headers: dict, timeout: float = 120):
+    """建立上游视频流（直连优先、代理兜底），成功返回 (client, resp)，失败抛 _UpstreamError。
 
     与解析逻辑保持一致：默认绕过系统代理（trust_env=False）直连抖音等国内 CDN，
     避免本地代理（如 Clash）对国内 CDN 偶发返回 502；若直连失败再尝试代理。
-    对 5xx / 连接错误做有限重试，吸收 CDN 的瞬时 502。
     4xx（403/404 等）视为不可恢复，直接抛出。
+    注意：本函数仅建立流并返回，不读取响应体——由调用方以 64KB 分块流式回传，
+    避免把整个视频读进内存（大视频会撑爆服务进程内存）。所有失败路径都会关闭 client。
     """
     last_err = "未知错误"
-    for attempt in range(max_retries):
-        for via_proxy in (False, True):
-            try:
-                kwargs = dict(timeout=timeout, verify=SSL_VERIFY, follow_redirects=True)
-                if via_proxy:
-                    proxy = get_active_proxy()
-                    if not proxy:
-                        continue
-                    kwargs["proxies"] = proxy
-                else:
-                    kwargs["trust_env"] = False
-                async with httpx.AsyncClient(**kwargs) as client:
-                    resp = await client.get(url, headers=headers)
-                    if resp.status_code == 200:
-                        return resp.content, resp.headers.get("content-type", "video/mp4")
-                    last_err = f"上游返回 {resp.status_code}"
-                    if 400 <= resp.status_code < 500:
-                        raise _UpstreamError(last_err)
-            except _UpstreamError:
-                raise
-            except Exception as e:
-                last_err = f"{type(e).__name__}: {e}"
-        if attempt < max_retries - 1:
-            await asyncio.sleep(0.5)
+    for via_proxy in (False, True):
+        client = None
+        try:
+            kwargs = dict(timeout=timeout, verify=SSL_VERIFY, follow_redirects=True)
+            if via_proxy:
+                proxy = get_active_proxy()
+                if not proxy:
+                    continue
+                kwargs["proxy"] = proxy
+            else:
+                kwargs["trust_env"] = False
+            client = httpx.AsyncClient(**kwargs)
+            req = client.build_request("GET", url, headers=headers)
+            resp = await client.send(req, stream=True)
+            if resp.status_code == 200:
+                return client, resp
+            # 非 200：关闭连接并视为失败
+            await resp.aclose()
+            last_err = f"上游返回 {resp.status_code}"
+            if 400 <= resp.status_code < 500:
+                await client.aclose()
+                raise _UpstreamError(last_err)
+            await client.aclose()
+        except _UpstreamError:
+            raise
+        except Exception as e:
+            if client is not None:
+                try:
+                    await client.aclose()
+                except Exception:
+                    pass
+            last_err = f"{type(e).__name__}: {e}"
     raise _UpstreamError(last_err)
 
 
@@ -103,7 +113,7 @@ async def supported_platforms():
         {"id": "douyin", "name": "抖音", "domains": ["douyin.com", "iesdouyin.com"]},
         {"id": "bilibili", "name": "B站", "domains": ["bilibili.com", "b23.tv"]},
         {"id": "weibo", "name": "微博", "domains": ["weibo.com", "weibo.cn"]},
-        {"id": "xiaohongshu", "name": "小红书", "domains": ["xiaohongshu.com", "xhslink.com"]},
+        {"id": "xiaohongshu", "name": "小红书", "domains": ["xiaohongshu.com", "xhslink.com", "xhslink.cn"]},
         {"id": "tiktok", "name": "TikTok", "domains": ["tiktok.com"]},
         {"id": "youtube", "name": "YouTube", "domains": ["youtube.com", "youtu.be"]},
         {"id": "instagram", "name": "Instagram", "domains": ["instagram.com"]},
@@ -159,7 +169,13 @@ async def parse_video(req: ParseRequest, request: Request):
         raise HTTPException(status_code=400, detail="仅支持 http/https 链接或视频信息 JSON")
     if not _is_safe_url(url):
         raise HTTPException(status_code=403, detail="不允许访问该地址")
-    result = await parse_link(url)
+
+    # 小红书链接需要携带 Cookie 才能获取笔记内容（尤其 xsec_token 鉴权后的页面）
+    cookie = ""
+    if "xiaohongshu.com" in url or "xhslink" in url:
+        cookie = load_xhs_cookie(ip)
+
+    result = await parse_link(url, cookie=cookie)
     if result["success"] and result["data"]:
         _add_to_history(result["data"], ip)
     return result
@@ -177,7 +193,7 @@ async def tiktok_oembed(url: str = Query(...)):
         proxy = get_active_proxy()
         client_kwargs = dict(timeout=15, verify=SSL_VERIFY, follow_redirects=True)
         if proxy:
-            client_kwargs["proxies"] = proxy
+            client_kwargs["proxy"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(
                 "https://www.tiktok.com/oembed",
@@ -266,17 +282,25 @@ async def proxy_video(video_url: str = Query(...), referer: str = Query("https:/
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": referer,
         }
-        # 优先直连（绕过系统代理，与解析逻辑一致），失败再走代理兜底；并对 5xx 做有限重试。
-        # 直连可避开本地代理对抖音 CDN 偶发的 502，重试可吸收抖音 CDN 本身的瞬时 502。
+        # 先建立上游流（直连优先、代理兜底），拿到 200 后再以 64KB 分块流式回传，
+        # 避免把整个视频读进内存（大视频会撑爆服务进程内存）。
         try:
-            content, content_type = await _fetch_upstream(video_url, headers, timeout=60)
+            client, resp = await _open_proxy_stream(video_url, headers)
         except _UpstreamError as e:
             raise HTTPException(status_code=502, detail=f"视频代理获取失败: {e}")
 
+        async def _gen():
+            try:
+                async for chunk in resp.aiter_bytes(65536):
+                    yield chunk
+            finally:
+                await resp.aclose()
+                await client.aclose()
+
         return StreamingResponse(
-            iter([content]),
-            media_type=content_type,
-            headers={"Accept-Ranges": "bytes", "Content-Length": str(len(content))},
+            _gen(),
+            media_type=resp.headers.get("content-type", "video/mp4"),
+            headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"},
         )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="代理请求超时")
@@ -365,7 +389,7 @@ async def download_video(
                 detail="TikTok 下载需要可访问 TikTok 的网络或代理，请配置代理地址后重试"
             )
 
-        def _download_with_ytdlp(proxy: str = ""):
+        def _download_with_ytdlp(proxy: str = "", cookie_opts: dict = None):
             import yt_dlp
 
             def _progress_hook(d):
@@ -385,6 +409,8 @@ async def download_video(
                 "fragment_retries": 3,
                 "extractor_retries": 2,
             }
+            if cookie_opts:
+                ydl_opts.update(cookie_opts)
             if proxy:
                 ydl_opts["proxy"] = proxy
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -414,7 +440,15 @@ async def download_video(
                 try:
                     # 应用级重试：TikTok 等平台会概率性返回 403 反爬，重试即可成功。
                     # yt-dlp 原生 retries 覆盖不到 extract 阶段的 403，故在此补一层。
-                    # 同时遍历 proxy_attempts（直连优先，代理兜底）
+                    # 同时遍历 proxy_attempts（直连优先，代理兜底）。
+                    # Cookie：首轮带 Cookie（规避 YouTube bot 校验）；若因 Cookie 提取
+                    # 失败（如浏览器未安装 / Cookie 数据库被占用），自动降级为无 Cookie 重试。
+                    # extractor_args 切换播放器客户端（tv/ios 等）无需登录即可绕过大多数
+                    # bot 校验，与 Cookie 叠加使用；降级时仅丢弃 Cookie，保留该选项。
+                    cookie_opts = get_ytdlp_cookie_opts()
+                    extract_args = get_youtube_extractor_args()
+                    cookies_disabled = False
+                    last_cookie_err = ""
                     for proxy in proxy_attempts:
                         if cancel_event.is_set():
                             break
@@ -422,7 +456,9 @@ async def download_video(
                             if cancel_event.is_set():
                                 break
                             try:
-                                await asyncio.to_thread(_download_with_ytdlp, proxy)
+                                await asyncio.to_thread(
+                                    _download_with_ytdlp, proxy, {**cookie_opts, **extract_args}
+                                )
                                 break
                             except _DownloadCancelled:
                                 raise
@@ -431,6 +467,19 @@ async def download_video(
                                     raise
                                 _cleanup_partial()  # 清理残留分片再重试
                                 msg = str(e)
+                                # Cookie 提取失败 → 降级为无 Cookie 再试（仅一次）
+                                if not cookies_disabled and is_cookie_related_error(msg):
+                                    cookies_disabled = True
+                                    cookie_opts = {}
+                                    last_cookie_err = msg[:120]
+                                    logger.warning(
+                                        f"[下载] {platform_name} Cookie 提取失败，降级为无 Cookie 重试: {msg[:80]}"
+                                    )
+                                    for _ in range(5):
+                                        if cancel_event.is_set():
+                                            break
+                                        await asyncio.sleep(0.1)
+                                    continue
                                 transient = any(k in msg for k in (
                                     "403", "Forbidden", "Unable to download webpage",
                                     "timed out", "Read timed out", "Connection",
@@ -454,7 +503,10 @@ async def download_video(
                         break
                     else:
                         # 所有代理配置都失败，抛异常
-                        raise HTTPException(status_code=502, detail=f"{platform_name} 下载失败: 所有代理配置均失败")
+                        detail = f"{platform_name} 下载失败: 所有代理配置均失败"
+                        if last_cookie_err:
+                            detail += f"；Cookie 提示: {last_cookie_err}"
+                        raise HTTPException(status_code=502, detail=detail)
                 finally:
                     watcher.cancel()
             # 兜底：若 yt-dlp 吞掉了 hook 抛出的取消异常并正常返回，仍按取消处理
@@ -511,23 +563,31 @@ async def download_video(
                     if resp.status_code != 200:
                         raise HTTPException(status_code=502, detail=f"微信视频下载失败 (HTTP {resp.status_code})")
 
-                    buf = bytearray()
-                    async for chunk in resp.aiter_bytes(65536):
-                        if cancel_event.is_set():
-                            logger.info("[下载] 微信视频号 已被客户端取消")
-                            raise HTTPException(status_code=499, detail="下载已取消")
-                        buf.extend(chunk)
-                    content = bytes(buf)
+                    with open(filepath, "wb") as f:
+                        async for chunk in resp.aiter_bytes(65536):
+                            if cancel_event.is_set():
+                                logger.info("[下载] 微信视频号 已被客户端取消")
+                                f.close()
+                                try:
+                                    filepath.unlink(missing_ok=True)
+                                except OSError:
+                                    pass
+                                raise HTTPException(status_code=499, detail="下载已取消")
+                            f.write(chunk)
 
-                # 如果有解密密钥，需要解密（ISAAC 流密码）
+                # 如果有解密密钥，仅解密并写回文件头部（ISAAC 只加密前 128KB），避免整段读入内存
                 if decrypt_key:
                     try:
-                        from decrypt import decrypt_isaac
-                        content = decrypt_isaac(content, int(decrypt_key))
+                        from decrypt import decrypt_isaac, DEFAULT_ENC_LEN
+                        size = filepath.stat().st_size
+                        n = min(DEFAULT_ENC_LEN, size)
+                        with open(filepath, "rb+") as f:
+                            head = bytearray(f.read(n))
+                            head = decrypt_isaac(head, int(decrypt_key))
+                            f.seek(0)
+                            f.write(head)
                     except Exception as e:
                         logger.warning(f"视频解密失败: {e}")
-
-                filepath.write_bytes(content)
 
                 # 验证解密后的视频文件
                 if not _is_valid_video(filepath):
@@ -565,7 +625,7 @@ async def download_video(
         configs = [{"timeout": 120, "verify": False, "follow_redirects": True, "trust_env": False}]
         proxy = get_active_proxy()
         if proxy:
-            configs.append({"timeout": 120, "verify": False, "follow_redirects": True, "proxies": proxy})
+            configs.append({"timeout": 120, "verify": False, "follow_redirects": True, "proxy": proxy})
         last_err = None
         done = False
         for attempt in range(3):
@@ -748,7 +808,7 @@ async def set_proxy_config(req: ProxyConfigRequest):
 
 async def _test_client_proxy(proxy: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=4, verify=SSL_VERIFY, proxies=proxy) as client:
+        async with httpx.AsyncClient(timeout=4, verify=SSL_VERIFY, proxy=proxy) as client:
             resp = await client.get(
                 "https://www.tiktok.com/oembed",
                 params={"url": "https://www.tiktok.com/@tiktok/video/7106594312292453678"},

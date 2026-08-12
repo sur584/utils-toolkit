@@ -19,6 +19,27 @@ def _proxy_args() -> list[str]:
     return ["--proxy", proxy] if proxy else []
 
 
+def resolve_cookie_cli_args() -> list[str]:
+    """根据后端配置（YT_COOKIES_FILE / YT_COOKIES_FROM_BROWSER / Windows 默认 chrome）
+    生成 yt-dlp CLI 的 Cookie 参数，规避 YouTube 的 bot 校验。
+
+    返回 [] 表示不加 Cookie（可能触发 "Sign in to confirm you're not a bot"）。
+    """
+    try:
+        from ytdlp_cookies import get_ytdlp_cookie_opts
+    except Exception:
+        return []
+    opts = get_ytdlp_cookie_opts()
+    if not opts:
+        return []
+    if "cookiefile" in opts:
+        return ["--cookies", opts["cookiefile"]]
+    if "cookiesfrombrowser" in opts:
+        browser = opts["cookiesfrombrowser"][0][0]
+        return ["--cookies-from-browser", browser]
+    return []
+
+
 def find_ytdlp() -> Optional[str]:
     """Find yt-dlp executable. Priority: bundled > system PATH."""
     # 1. Check bundled
@@ -44,11 +65,11 @@ def find_ytdlp() -> Optional[str]:
     return None
 
 
-async def get_video_info(url: str, ytdlp_path: str, cookies_path: Optional[str] = None) -> dict:
+async def get_video_info(url: str, ytdlp_path: str, cookie_args: Optional[list] = None) -> dict:
     """Get video metadata via yt-dlp --dump-json."""
     cmd = [ytdlp_path, "--dump-json", "--no-download"]
-    if cookies_path and Path(cookies_path).exists():
-        cmd.extend(["--cookies", cookies_path])
+    if cookie_args:
+        cmd.extend(cookie_args)
     cmd.append(url)
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -65,7 +86,7 @@ async def get_video_info(url: str, ytdlp_path: str, cookies_path: Optional[str] 
     return json.loads(stdout.decode())
 
 
-async def download_subtitles(url: str, output_dir: str, ytdlp_path: str, cookies_path: Optional[str] = None) -> Optional[Path]:
+async def download_subtitles(url: str, output_dir: str, ytdlp_path: str, cookie_args: Optional[list] = None) -> Optional[Path]:
     """Download subtitles via yt-dlp. Returns path to found subtitle file, or None."""
     output_template = os.path.join(output_dir, "%(title)s.%(ext)s")
     cmd = [
@@ -75,8 +96,8 @@ async def download_subtitles(url: str, output_dir: str, ytdlp_path: str, cookies
         "--skip-download",
         "-o", output_template,
     ]
-    if cookies_path and Path(cookies_path).exists():
-        cmd.extend(["--cookies", cookies_path])
+    if cookie_args:
+        cmd.extend(cookie_args)
     cmd.append(url)
     logger.info(f"yt-dlp subtitle cmd: {' '.join(cmd)}")
     proc = await asyncio.create_subprocess_exec(
@@ -119,7 +140,7 @@ def _find_subtitle_file(directory: Path) -> Optional[Path]:
     return None
 
 
-async def download_audio(url: str, output_dir: str, ytdlp_path: str, cookies_path: Optional[str] = None) -> Optional[Path]:
+async def download_audio(url: str, output_dir: str, ytdlp_path: str, cookie_args: Optional[list] = None) -> Optional[Path]:
     """Download audio-only via yt-dlp."""
     output_template = os.path.join(output_dir, "%(title)s.%(ext)s")
     cmd = [
@@ -128,8 +149,8 @@ async def download_audio(url: str, output_dir: str, ytdlp_path: str, cookies_pat
         "--audio-quality", "5",
         "-o", output_template,
     ]
-    if cookies_path and Path(cookies_path).exists():
-        cmd.extend(["--cookies", cookies_path])
+    if cookie_args:
+        cmd.extend(cookie_args)
     cmd.append(url)
     logger.info(f"yt-dlp audio cmd: {' '.join(cmd)}")
     proc = await asyncio.create_subprocess_exec(

@@ -673,7 +673,7 @@ async def _parse_profile_xiaohongshu(url: str, limit: int, page: int = 1, cookie
 
 
 # ─── 统一入口 ────────────────────────────────────────
-_SHORT_LINK_HOSTS = ("v.douyin.com", "vm.tiktok.com", "vt.tiktok.com", "b23.tv", "xhslink.com", "youtu.be")
+_SHORT_LINK_HOSTS = ("v.douyin.com", "vm.tiktok.com", "vt.tiktok.com", "b23.tv", "xhslink.com", "xhslink.cn", "youtu.be")
 
 
 async def parse_profile(url: str, limit: int = DEFAULT_PROFILE_LIMIT, page: int = 1, cookie: str = "") -> Dict[str, Any]:

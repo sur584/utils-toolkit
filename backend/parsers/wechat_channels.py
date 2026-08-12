@@ -49,11 +49,14 @@ FEED_INFO_API = 'https://channels.weixin.qq.com/finder-preview/api/feed/get_feed
 def _parse_count(s) -> int:
     if not s:
         return 0
-    s = str(s).replace(',', '')
-    if '万' in s:
-        return int(float(s.replace('万', '')) * 10000)
+    s = str(s).strip()
+    # 视频号格式化字段可能为 '10+万' / '10万' / '10+' / '1,234' 等形式
+    multiplier = 10000 if '万' in s else 1
+    s = s.replace('万', '').replace('+', '').replace(',', '').strip()
+    if not s:
+        return 0
     try:
-        return int(s)
+        return int(float(s) * multiplier)
     except (ValueError, TypeError):
         return 0
 
