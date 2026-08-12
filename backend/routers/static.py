@@ -13,6 +13,8 @@ from config import (
     TRANSCRIPT_DIR,
 )
 
+from version import APP_NAME, APP_VERSION
+
 router = APIRouter()
 
 
@@ -27,6 +29,12 @@ async def tools_home():
     if index_file.exists():
         return FileResponse(str(index_file))
     return {"message": "小小工具箱 API 运行中", "docs": "/docs"}
+
+
+@router.get("/api/version")
+async def app_version():
+    """返回应用版本号（读取自版本配置文件 version.json，前端与后端共用同一来源）"""
+    return {"name": APP_NAME, "version": APP_VERSION}
 
 
 def mount_static(app):

@@ -264,6 +264,18 @@ a { text-decoration: none; color: inherit; }
     text-align: center; line-height: 1.6;
 }
 
+/* ─── 全局版本栏（底部固定，始终可见，版本号来自 /api/version 统一配置源） ─── */
+.version-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    padding: 6px 16px; text-align: center;
+    font-size: 12px; color: var(--text-muted);
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border);
+    letter-spacing: 0.3px; user-select: none;
+}
+/* 避免固定栏遮挡页面底部内容 */
+body { padding-bottom: 32px; }
+
 /* ─── Mobile ─── */
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 49; }
 .mobile-header {
@@ -715,6 +727,9 @@ a { text-decoration: none; color: inherit; }
     </aside>
 </div>
 
+    <!-- 全局版本栏：始终可见，版本号由 /api/version 提供（读取自 version.json 统一配置源） -->
+    <div class="version-bar" id="versionBar">版本加载中…</div>
+
 <script>
 const recentUpdatesJson = [
     {
@@ -927,6 +942,22 @@ sidebarNavItems.forEach(btn => {
             });
         });
     });
+})();
+
+// 全局版本栏：从统一配置源 /api/version 读取版本号并展示（不在前端硬编码）
+(function loadAppVersion() {
+    var bar = document.getElementById('versionBar');
+    if (!bar) return;
+    fetch('/api/version')
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function (d) {
+            var v = (d && d.version) ? String(d.version) : '';
+            var n = (d && d.name) ? String(d.name) : '小小工具箱';
+            bar.textContent = n + (v ? ' v' + v : '');
+        })
+        .catch(function () {
+            bar.textContent = '小小工具箱 v?.?.?';
+        });
 })();
 </script>
 </body>

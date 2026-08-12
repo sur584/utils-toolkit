@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from parsers import parse_link, batch_parse
 from parsers._utils import _is_safe_url, _extract_url
+from version import get_app_version
 
 from config import DOWNLOAD_DIR, get_active_proxy, SSL_VERIFY
 from ytdlp_cookies import get_ytdlp_cookie_opts, get_youtube_extractor_args, is_cookie_related_error
@@ -103,7 +104,7 @@ async def _open_proxy_stream(url: str, headers: dict, timeout: float = 120):
 
 @router.get("/api/health")
 async def health_check():
-    return {"status": "ok", "version": "3.0.0"}
+    return {"status": "ok", "version": get_app_version()}
 
 
 @router.get("/api/platforms")
