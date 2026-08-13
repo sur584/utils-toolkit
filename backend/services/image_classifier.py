@@ -1,10 +1,20 @@
 """
 图片分类器 - 使用 MobileNetV3 ONNX 推理识别图片类型
 分类结果：product / portrait / pet / general
+
+P0 (2026-08-05): 原 onnx/models GitHub 路径已 404（v3 文件被移除），
+                 MODEL_URL 改为 MODEL_URLS 列表，按顺序 fallback 下载，
+                 首选 HuggingFace onnx-community 镜像。
+P1 (2026-08-05): 加进程内下载锁 + 双重检查 + 5 分钟失败冷却，
+                 并使用 .downloading 临时文件防止半成品被误读。
+P2 (2026-08-05): 连续失败 3 次后全局禁用分类器，静默返回 general，
+                 避免批量任务中每个请求都刷错误日志。
 """
 
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -17,8 +27,22 @@ logger = logging.getLogger(__name__)
 class ImageClassifier:
     """使用 MobileNetV3 ONNX 推理对图片进行分类"""
 
-    MODEL_URL = "https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv3-small-12.onnx"
+    # P0: 多源 fallback，按顺序尝试，第一个成功即使用。
+    # 原 GitHub onnx/models 路径已 404（该仓库 mobilenet 目录下 v3 文件被移除，
+    # 目前只剩 mobilenetv2-*）。首选 HuggingFace onnx-community 转换的 timm
+    # MobileNetV3-Small-100（ImageNet-1k，1000 类，预处理与原模型一致）。
+    MODEL_URLS = [
+        "https://huggingface.co/onnx-community/mobilenetv3_small_100.lamb_in1k/resolve/main/onnx/model.onnx",
+        # 历史路径，保留作为最后 fallback；已确认 404，实际不会命中。
+        "https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv3-small-12.onnx",
+    ]
     MODEL_FILENAME = "mobilenetv3_classifier.onnx"
+
+    # P1: 下载失败后冷却时间（秒），冷却期内直接放弃下载，让上层降级 general。
+    _RETRY_INTERVAL = 300
+
+    # P2: 连续失败达到该阈值后全局禁用分类器（不再尝试加载/推理）。
+    _DISABLE_THRESHOLD = 3
 
     def __init__(self, models_dir: str = None):
         self._session = None
@@ -27,26 +51,67 @@ class ImageClassifier:
         self._input_name = None
         self._loaded = False
 
+        # P1: 下载流程的进程内互斥锁 + 失败冷却时间戳。
+        self._download_lock = threading.Lock()
+        self._last_failure_time: float = 0.0
+
+        # P2: 连续失败计数与全局禁用开关；用独立轻量锁保护计数，
+        # 避免与下载锁竞争导致推理请求被串行化。
+        self._state_lock = threading.Lock()
+        self._failure_count: int = 0
+        self._disabled: bool = False
+
     def _ensure_model(self):
-        """确保模型文件存在，不存在则下载"""
+        """确保模型文件存在，不存在则按 MODEL_URLS 顺序下载（线程安全 + 失败冷却）"""
+        # P1: 双重检查 - 锁外快路径，避免每次都抢锁。
         if self._model_path.exists():
             return
 
-        logger.info(f"下载 MobileNetV3 分类模型到 {self._model_path}")
-        self._models_dir.mkdir(parents=True, exist_ok=True)
+        with self._download_lock:
+            # P1: 进入锁后再次检查，可能其他线程已经下载完成。
+            if self._model_path.exists():
+                return
 
-        try:
-            import urllib.request
-            tmp_path = self._model_path.with_suffix(".tmp")
-            urllib.request.urlretrieve(self.MODEL_URL, str(tmp_path))
-            os.replace(tmp_path, self._model_path)
-            logger.info("MobileNetV3 模型下载完成")
-        except Exception as e:
-            tmp_path = self._model_path.with_suffix(".tmp")
-            if tmp_path.exists():
-                tmp_path.unlink()
-            logger.error(f"MobileNetV3 模型下载失败: {e}")
-            raise RuntimeError(f"分类模型下载失败: {e}")
+            # P1: 冷却期内直接失败，避免批量任务中每个请求都重复打网络。
+            now = time.time()
+            if self._last_failure_time and now - self._last_failure_time < self._RETRY_INTERVAL:
+                remaining = int(self._RETRY_INTERVAL - (now - self._last_failure_time))
+                raise RuntimeError(
+                    f"分类模型近期下载失败，{remaining}s 内不再重试（已降级 general）"
+                )
+
+            self._models_dir.mkdir(parents=True, exist_ok=True)
+            # P1: 用 .downloading 后缀防止半成品被其他线程/进程当成有效文件读取。
+            tmp_path = self._model_path.with_suffix(".downloading")
+
+            last_error: Optional[Exception] = None
+            for idx, url in enumerate(self.MODEL_URLS):
+                try:
+                    logger.info(f"下载 MobileNetV3 分类模型 [{idx + 1}/{len(self.MODEL_URLS)}]: {url}")
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                    import urllib.request
+                    urllib.request.urlretrieve(url, str(tmp_path))
+                    # P1: 原子替换，落盘成功后其他线程才能看到完整文件。
+                    os.replace(tmp_path, self._model_path)
+                    logger.info("MobileNetV3 模型下载完成")
+                    # P2: 下载成功，重置失败计数。
+                    self._last_failure_time = 0.0
+                    self._failure_count = 0
+                    return
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"模型源 [{idx + 1}] 下载失败: {url} -> {e}")
+                    if tmp_path.exists():
+                        try:
+                            tmp_path.unlink()
+                        except OSError:
+                            pass
+                    continue
+
+            # P1: 所有源都失败，记录冷却起点，让后续请求快速失败。
+            self._last_failure_time = time.time()
+            raise RuntimeError(f"分类模型全部下载源均失败: {last_error}")
 
     def _load(self):
         """加载 ONNX 模型"""
@@ -84,21 +149,59 @@ class ImageClassifier:
         Returns:
             "product" | "portrait" | "pet" | "general"
         """
+        # P2: 已禁用时静默降级，不再刷日志。
+        if self._disabled:
+            return "general"
         try:
             self._load()
-            return self._classify_internal(img)
+            result = self._classify_internal(img)
+            # P2: 推理成功，重置连续失败计数。
+            with self._state_lock:
+                self._failure_count = 0
+            return result
         except Exception as e:
-            logger.warning(f"图片分类失败，默认 general: {e}")
+            self._record_failure(e, context="单张分类")
             return "general"
 
     def classify_batch(self, images: list) -> list:
         """批量分类"""
+        # P2: 已禁用时静默降级，保持返回长度与输入一致。
+        if self._disabled:
+            return ["general"] * len(images)
         try:
             self._load()
-            return [self._classify_internal(img) for img in images]
+            results = [self._classify_internal(img) for img in images]
+            # P2: 推理成功，重置连续失败计数。
+            with self._state_lock:
+                self._failure_count = 0
+            return results
         except Exception as e:
-            logger.warning(f"批量分类失败，默认 general: {e}")
+            self._record_failure(e, context="批量分类")
             return ["general"] * len(images)
+
+    def _record_failure(self, error: Exception, context: str = "分类"):
+        """
+        P2: 记录一次分类失败，连续失败达到阈值则全局禁用分类器。
+        禁用前打印 warning 告知用户；禁用后 classify/classify_batch 入口会
+        静默降级，不再输出日志噪音。
+        """
+        with self._state_lock:
+            if self._disabled:
+                return
+            self._failure_count += 1
+            count = self._failure_count
+            should_disable = count >= self._DISABLE_THRESHOLD
+
+        if should_disable:
+            self._disabled = True
+            logger.warning(
+                f"图片分类器连续失败 {count} 次，已全局禁用，后续请求将静默降级为 general。"
+                f"最后一次错误({context}): {error}"
+            )
+        else:
+            logger.warning(
+                f"{context}失败，默认 general（连续失败 {count}/{self._DISABLE_THRESHOLD}）: {error}"
+            )
 
     def _classify_internal(self, img: Image.Image) -> str:
         """内部分类逻辑"""

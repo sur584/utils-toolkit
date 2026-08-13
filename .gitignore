@@ -29,6 +29,7 @@ backend/history_data/
 
 # Backend logs
 backend/app.log
+backend/launcher_restart.log
 
 # Test files
 backend/test_*.py

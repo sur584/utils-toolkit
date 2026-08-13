@@ -264,6 +264,18 @@ a { text-decoration: none; color: inherit; }
     text-align: center; line-height: 1.6;
 }
 
+/* ─── 全局版本栏（底部固定，始终可见，版本号来自 /api/version 统一配置源） ─── */
+.version-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    padding: 6px 16px; text-align: center;
+    font-size: 12px; color: var(--text-muted);
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border);
+    letter-spacing: 0.3px; user-select: none;
+}
+/* 避免固定栏遮挡页面底部内容 */
+body { padding-bottom: 32px; }
+
 /* ─── Mobile ─── */
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 49; }
 .mobile-header {
@@ -531,10 +543,6 @@ a { text-decoration: none; color: inherit; }
                             <span class="nav-icon sub-icon">•</span>
                             视频解析下载
                         </a>
-                        <a class="nav-item nav-sub-item" href="wx-video-parser/" data-filter="video">
-                            <span class="nav-icon sub-icon">•</span>
-                            视频号解析
-                        </a>
                         <a class="nav-item nav-sub-item" href="transcript/" data-filter="video">
                             <span class="nav-icon sub-icon">•</span>
                             视频文案提取
@@ -597,7 +605,7 @@ a { text-decoration: none; color: inherit; }
         <div class="main-body">
             <div class="tools-head">
                 <h3>🧰 全部工具</h3>
-                <span class="count" id="countLabel">7 个工具</span>
+                <span class="count" id="countLabel">6 个工具</span>
             </div>
             <div class="tool-grid" id="toolGrid">
                 <a class="tool-card" href="video-tool/" data-color="blue" data-category="video" data-kw="视频 解析 下载 抖音 bilibili 小红书 tiktok youtube 快手 微博 西瓜 视频号 剪映">
@@ -687,21 +695,6 @@ a { text-decoration: none; color: inherit; }
                         <span class="tag tag-indigo">水印去除</span>
                     </div>
                 </a>
-                <a class="tool-card" href="wx-video-parser/" data-color="blue" data-category="video" data-kw="视频号 微信视频号 wechat channels 解析 下载 分享链接">
-                    <div class="card-head">
-                        <div class="card-icon" style="background:rgba(59,130,246,0.12)">📹</div>
-                        <div class="card-meta">
-                            <h4>视频号解析</h4>
-                            <span class="badge">微信视频号</span>
-                        </div>
-                    </div>
-                    <div class="card-body">粘贴微信视频号分享链接，一键解析视频信息并下载。支持 weixin.qq.com 和 channels.weixin.qq.com 链接。</div>
-                    <div class="card-foot">
-                        <span class="tag tag-blue">视频号</span>
-                        <span class="tag tag-blue">微信</span>
-                        <span class="tag tag-blue">下载</span>
-                    </div>
-                </a>
                 <a class="tool-card" href="transcript/" data-color="purple" data-category="video" data-kw="文案 提取 字幕 视频转文字 文案提取 ASR 语音识别 视频文案 抖音文案 转录 口播稿">
                     <div class="card-head">
                         <div class="card-icon" style="background:rgba(139,92,246,0.12)">📝</div>
@@ -733,6 +726,9 @@ a { text-decoration: none; color: inherit; }
         </div>
     </aside>
 </div>
+
+    <!-- 全局版本栏：始终可见，版本号由 /api/version 提供（读取自 version.json 统一配置源） -->
+    <div class="version-bar" id="versionBar">版本加载中…</div>
 
 <script>
 const recentUpdatesJson = [
@@ -946,6 +942,22 @@ sidebarNavItems.forEach(btn => {
             });
         });
     });
+})();
+
+// 全局版本栏：从统一配置源 /api/version 读取版本号并展示（不在前端硬编码）
+(function loadAppVersion() {
+    var bar = document.getElementById('versionBar');
+    if (!bar) return;
+    fetch('/api/version')
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function (d) {
+            var v = (d && d.version) ? String(d.version) : '';
+            var n = (d && d.name) ? String(d.name) : '小小工具箱';
+            bar.textContent = n + (v ? ' v' + v : '');
+        })
+        .catch(function () {
+            bar.textContent = '小小工具箱 v?.?.?';
+        });
 })();
 </script>
 </body>

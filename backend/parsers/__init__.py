@@ -6,6 +6,7 @@
 import time
 import random
 import asyncio
+import inspect
 import logging
 from typing import Optional, Dict, Any, List
 
@@ -62,18 +63,23 @@ def _set_cache(url: str, result: Dict[str, Any]):
 
 
 # ─── 重试 ────────────────────────────────────────────
-async def _parse_with_retry(url: str, platform: str, parser_func) -> Dict[str, Any]:
+async def _parse_with_retry(url: str, platform: str, parser_func, cookie: str = "") -> Dict[str, Any]:
     """带单次重试的解析"""
-    result = await parser_func(url)
+    kwargs = {}
+    if cookie:
+        sig = inspect.signature(parser_func)
+        if "cookie" in sig.parameters:
+            kwargs["cookie"] = cookie
+    result = await parser_func(url, **kwargs)
     if not result["success"] and result.get("retry") is not False:
         logger.info(f"Parse failed for {platform}, retrying once...")
         await asyncio.sleep(1.0)
-        result = await parser_func(url)
+        result = await parser_func(url, **kwargs)
     return result
 
 
 # ─── 统一入口 ────────────────────────────────────────
-async def parse_link(url: str) -> Dict[str, Any]:
+async def parse_link(url: str, cookie: str = "") -> Dict[str, Any]:
     """统一入口：自动检测平台并解析（带缓存和重试）"""
     raw_url = _extract_url(url)
     if raw_url:
@@ -91,7 +97,7 @@ async def parse_link(url: str) -> Dict[str, Any]:
     if platform:
         logger.info(f"[解析] 识别平台: {platform}")
         _, parser_func = PLATFORM_MAP[platform]
-        result = await _parse_with_retry(url, platform, parser_func)
+        result = await _parse_with_retry(url, platform, parser_func, cookie=cookie)
         if result.get("success"):
             logger.info(f"[解析] {platform} 解析成功")
         else:

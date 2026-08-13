@@ -10,7 +10,8 @@ from typing import Callable, Optional
 from opencc import OpenCC
 
 from .settings import load_settings
-from .ytdlp_utils import find_ytdlp, get_video_info, download_subtitles, download_audio
+from .ytdlp_utils import find_ytdlp, get_video_info, download_subtitles, download_audio, resolve_cookie_cli_args
+from .cloud_config import load_cloud_config
 from .platforms import detect_platform
 from .platforms.douyin import resolve_url as resolve_douyin_url, fetch_video_info, download_video_audio
 from .asr import get_asr_client
@@ -33,6 +34,8 @@ async def extract_transcript(
     asr_model: str = "auto",
     language: str = "zh",
     api_key: str = "",
+    preferred_lang: str = "",
+    cookies_path: str = "",
     progress_callback: Optional[Callable] = None,
 ) -> dict:
     """
@@ -76,7 +79,10 @@ async def extract_transcript(
         return result
 
     # 其他平台：使用 yt-dlp
-    result = await _extract_ytdlp(url, platform, method, language, settings, progress)
+    result = await _extract_ytdlp(
+        url, platform, method, language, settings, progress,
+        preferred_lang=preferred_lang, cookies_path=cookies_path,
+    )
     cache_put(url, result)
     return result
 
@@ -415,7 +421,8 @@ async def extract_transcript_from_file(
 
 
 async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
-                         language: str, settings, progress_cb) -> dict:
+                         language: str, settings, progress_cb,
+                         preferred_lang: str = "", cookies_path: str = "") -> dict:
     """其他平台的 yt-dlp 提取流程"""
     async def progress(step, pct, msg):
         if progress_cb:
@@ -425,13 +432,27 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
     if not ytdlp:
         raise RuntimeError("未找到 yt-dlp，请将其放置在 component/ 目录下或添加到系统 PATH")
 
+    # Cookie 参数：优先用前端在 transcript 配置里填的 cookies_path（Netscape 文件），
+    # 否则回退到后端统一配置（YT_COOKIES_FILE / YT_COOKIES_FROM_BROWSER / Windows 默认 chrome），
+    # 二者都是为规避 YouTube 的 "Sign in to confirm you're not a bot" 校验。
+    cookie_args: list = []
+    # Cookie 优先级：本次请求携带的 cookies_path > 全局 transcript 配置 > 后端统一代理/cookie 配置
+    if cookies_path and Path(cookies_path).exists():
+        cookie_args = ["--cookies", cookies_path]
+    else:
+        user_cp = load_cloud_config().cookies_path
+        if user_cp and Path(user_cp).exists():
+            cookie_args = ["--cookies", user_cp]
+        else:
+            cookie_args = resolve_cookie_cli_args()
+
     # Step 2: 获取视频信息
     await progress("parsing", 15, "正在获取视频信息...")
     title = "未知标题"
     author = "未知作者"
     info = {}
     try:
-        info = await get_video_info(url, ytdlp)
+        info = await get_video_info(url, ytdlp, cookie_args=cookie_args)
         title = info.get("title", "未知标题")[:100]
         author = info.get("uploader", "未知作者")
     except Exception as e:
@@ -446,7 +467,9 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
         await progress("subtitles", 25, "正在尝试获取平台字幕...")
         async with temp_workspace() as tmp:
             try:
-                sub_file = await download_subtitles(url, str(tmp), ytdlp)
+                sub_file = await download_subtitles(
+                    url, str(tmp), ytdlp, cookie_args=cookie_args, lang=preferred_lang
+                )
                 if sub_file:
                     await progress("subtitles", 40, "正在解析字幕文件...")
                     content = sub_file.read_text(encoding="utf-8-sig")
@@ -463,7 +486,7 @@ async def _extract_ytdlp(url: str, platform: Optional[str], method: str,
     if not transcript and method in ("auto", "asr_only"):
         await progress("asr", 55, "正在下载音频...")
         async with temp_workspace() as tmp:
-            audio_file = await download_audio(url, str(tmp), ytdlp)
+            audio_file = await download_audio(url, str(tmp), ytdlp, cookie_args=cookie_args)
             await progress("asr", 65, "正在上传音频...")
 
             audio_bytes = audio_file.read_bytes()

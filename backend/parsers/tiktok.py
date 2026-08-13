@@ -50,7 +50,7 @@ async def _tt_fetch(url: str, mobile: bool = True) -> Optional[str]:
         timeout = 8 if not proxy else 20
         client_kwargs = dict(timeout=timeout, verify=SSL_VERIFY, follow_redirects=False)
         if proxy:
-            client_kwargs["proxies"] = proxy
+            client_kwargs["proxy"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as c:
             r = await c.get(url, headers=_tt_headers_with_cookie(mobile=mobile))
             if r.status_code == 200:
@@ -132,7 +132,7 @@ async def _parse_via_oembed(url: str) -> Optional[Dict[str, Any]]:
         proxy = get_active_proxy()
         client_kwargs = dict(timeout=15, verify=SSL_VERIFY, follow_redirects=True)
         if proxy:
-            client_kwargs["proxies"] = proxy
+            client_kwargs["proxy"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(
                 "https://www.tiktok.com/oembed",

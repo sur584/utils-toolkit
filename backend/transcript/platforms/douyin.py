@@ -100,24 +100,34 @@ async def fetch_video_info(url: str) -> Dict[str, Any]:
     author = item.get("author", {})
     video = item.get("video", {})
 
-    # 获取视频下载地址（优先选最低码率，减少下载时间）
-    video_url = ""
-    bit_rates = video.get("bit_rate", [])
-    if bit_rates and isinstance(bit_rates, list):
-        try:
-            lowest = min(bit_rates, key=lambda b: b.get("bit_rate", float("inf")))
-            play = lowest.get("play_addr", {})
-            play_urls = play.get("url_list", []) if isinstance(play, dict) else []
-            if play_urls:
-                video_url = play_urls[0].replace("\\u002F", "/")
-        except (ValueError, TypeError):
-            pass
+    def _first_url(d):
+        if isinstance(d, dict):
+            ul = d.get("url_list", [])
+            if ul:
+                return ul[0].replace("\\u002F", "/")
+        return ""
 
-    # 回退到原始 play_addr
+    # 获取视频下载地址。
+    # 重要：默认 play_addr 多为 HEVC(265) 变体，常常是无音轨的「视频-only」版本，
+    # 直接语音识别会因缺少音轨而失败；play_addr_h264 通常为「视频 + h264/aac」合并版本，
+    # 自带音轨。因此优先选 h264 合并版，确保语音识别有音频可用。
+    video_url = _first_url(video.get("play_addr_h264"))
+
+    # 回退：最低码率 play_addr（HEVC）
     if not video_url:
-        play = video.get("play_addr", {})
-        play_urls = play.get("url_list", []) if isinstance(play, dict) else []
-        video_url = play_urls[0].replace("\\u002F", "/") if play_urls else ""
+        bit_rates = video.get("bit_rate", [])
+        if bit_rates and isinstance(bit_rates, list):
+            try:
+                lowest = min(bit_rates, key=lambda b: b.get("bit_rate", float("inf")))
+                video_url = _first_url(lowest.get("play_addr", {}))
+            except (ValueError, TypeError):
+                pass
+
+    # 再回退：原始 play_addr / download_addr（无水印合并版）
+    if not video_url:
+        video_url = _first_url(video.get("play_addr"))
+    if not video_url:
+        video_url = _first_url(video.get("download_addr"))
 
     # 无水印版本
     video_url_no_wm = video_url.replace("playwm", "play") if video_url else ""

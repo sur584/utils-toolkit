@@ -3,10 +3,12 @@ from typing import Optional
 
 DOUYIN_DOMAINS = ["v.douyin.com", "www.douyin.com", "www.iesdouyin.com", "m.douyin.com"]
 WECHAT_DOMAINS = ["channels.weixin.qq.com", "weixin.qq.com"]
+YOUTUBE_DOMAINS = ["youtube.com", "youtu.be", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com"]
 
 PLATFORM_DOMAINS = {
     "douyin": DOUYIN_DOMAINS,
     "wechat_channels": WECHAT_DOMAINS,
+    "youtube": YOUTUBE_DOMAINS,
 }
 
 

@@ -79,6 +79,26 @@ npx vite build
   - **无 Python 环境？** 直接双击 `app.bat`，会自动下载便携版 Python 到项目 `python/` 目录，无需管理员权限
   - 已有 Python？`app.bat` 会自动检测并跳过安装，直接启动
 
+## 配置说明
+
+### YouTube / TikTok 下载报 "Sign in to confirm you're not a bot"
+
+YouTube 对未登录请求会频繁弹出人机校验，yt-dlp 必须携带登录态 Cookie 才能稳定解析/下载。本项目已内置以下零/低配置方案（按优先级）：
+
+| 环境变量 | 说明 | 示例 |
+|----------|------|------|
+| `YT_COOKIES_FILE` | Netscape 格式 `cookies.txt` 的绝对路径（用「Get cookies.txt」等浏览器插件从**已登录 YouTube**的浏览器导出） | `C:\cookies\youtube.txt` |
+| `YT_COOKIES_FROM_BROWSER` | 直接读取本机浏览器 Cookie 数据库；`chrome`/`edge`/`firefox`/`brave` 等。未设置时 **Windows 默认尝试 `chrome`**（需服务与浏览器同账号且已登录 YouTube） | `edge`（设 `none` 可强制关闭） |
+
+代码还会自动尝试切换播放器客户端（`tv`/`ios` 等）以绕过大多数 bot 校验；若 Cookie 提取失败会自动降级为无 Cookie 重试，不会再出现 500 崩溃（改为返回明确的错误信息）。
+
+> 实操建议：最稳妥的方式是用浏览器插件导出 `cookies.txt`（在**已登录 YouTube** 的浏览器里），放到服务器上并设 `YT_COOKIES_FILE`，重启服务即可。局域网内本机 Chrome 已登录 YouTube 时，默认的 `cookiesfrombrowser=chrome` 通常无需任何配置。
+
+### 下载内存占用
+
+- `/api/proxy`（在线预览代理）与微信视频号（`wx://`）下载均已改为 **64KB 分块流式处理**，不再把整个视频读进内存，避免大视频撑爆服务进程内存。
+- YouTube / TikTok / B站 下载由 yt-dlp 直接落盘，本身不占内存。
+
 ## 项目结构
 
 ```
@@ -182,6 +202,10 @@ utils-toolkit/
 首次运行会自动构建前端，后续启动直接跳过。修改了前端源码后，双击 `rebuild.bat` 重新构建。
 
 ## 最近更新
+
+### 2026-08-11
+- **修复** YouTube / TikTok 下载 "Sign in to confirm you're not a bot"：新增 Cookie 支持（`YT_COOKIES_FILE` / `YT_COOKIES_FROM_BROWSER`，Windows 默认读本机 chrome），并自动尝试切换播放器客户端绕过校验；Cookie 提取失败时优雅降级，不再 500 崩溃
+- **修复** 下载内存过大：`/api/proxy` 与微信视频号 `wx://` 下载改为 64KB 分块流式处理，不再把整个视频读进内存
 
 ### 2026-07-29
 - **优化** 安全加固：新增 TLS 校验开关（`UT_SSL_VERIFY`）、服务绑定地址可配（`UT_HOST`），模型下载改原子替换防半截文件

@@ -22,6 +22,7 @@ from transcript.platforms._utils import _is_safe_url, _extract_url
 from transcript.asr.local_whisper import is_local_whisper_available
 from transcript.cloud_asr import get_cloud_client
 from transcript.ytdlp_utils import find_ytdlp
+from transcript.platforms.youtube import list_subtitle_tracks, pick_default_lang
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,8 @@ class TranscriptRequest(BaseModel):
     method: str = "auto"        # "auto" | "subtitle_only" | "asr_only"
     asr_model: str = "auto"     # "auto" | specific model id
     language: str = "zh"
+    preferred_lang: str = ""    # YouTube 字幕语言偏好，如 en / zh-Hans / ja
+    cookies_path: str = ""      # 用于突破 YouTube 限制的 Cookie 文件（Netscape 格式）
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -288,6 +291,8 @@ async def _run_job(job_id: str, req: TranscriptRequest):
                 asr_model=req.asr_model,
                 language=req.language,
                 api_key=settings.siliconflow_api_key,
+                preferred_lang=req.preferred_lang,
+                cookies_path=req.cookies_path,
                 progress_callback=progress_cb,
             )
 
@@ -405,6 +410,8 @@ async def extract_direct(req: TranscriptRequest):
                     asr_model=req.asr_model,
                     language=req.language,
                     api_key=settings.siliconflow_api_key,
+                    preferred_lang=req.preferred_lang,
+                    cookies_path=req.cookies_path,
                 ),
                 timeout=300.0,
             )
@@ -469,3 +476,36 @@ async def proxy_video(video_url: str = "", referer: str = "https://www.douyin.co
     except Exception as e:
         logger.error(f"Proxy failed: {e}")
         raise HTTPException(status_code=502, detail="代理请求失败")
+
+
+# ─── YouTube 字幕轨道列举 ───────────────────
+@router.get("/api/transcript/youtube/subs")
+async def youtube_subtitles(url: str = "", cookies_path: str = ""):
+    """列举 YouTube 视频的可用字幕轨道（供前端语言下拉选择）。"""
+    if not url:
+        return _make_response(False, "缺少 url 参数")
+    url = _extract_url(url) or url.strip()
+    if not _is_safe_url(url):
+        return _make_response(False, "不安全的链接")
+
+    # 仅接受 YouTube 链接
+    from urllib.parse import urlparse
+    netloc = urlparse(url).netloc.lower()
+    if not any(d in netloc for d in ("youtube.com", "youtu.be", "youtube-nocookie.com")):
+        return _make_response(False, "仅支持 YouTube 链接")
+
+    ytdlp = find_ytdlp()
+    if not ytdlp:
+        return _make_response(False, "未找到 yt-dlp，请将其放置在 component/ 目录或添加到系统 PATH")
+
+    try:
+        tracks = await list_subtitle_tracks(url, ytdlp, cookies_path)
+        default_lang = pick_default_lang(tracks)
+        return _make_response(True, "ok", {
+            "tracks": tracks,
+            "default_lang": default_lang,
+            "count": len(tracks),
+        })
+    except Exception as e:
+        logger.error(f"YouTube 字幕列举失败: {e}", exc_info=True)
+        return _make_response(False, f"字幕列举失败：{e}")

@@ -71,7 +71,7 @@ async def _fetch(
         proxy = get_active_proxy()
         client_kwargs = dict(timeout=timeout, verify=SSL_VERIFY, follow_redirects=follow)
         if use_proxy and proxy:
-            client_kwargs["proxies"] = proxy
+            client_kwargs["proxy"] = proxy
         if not use_proxy:
             client_kwargs["trust_env"] = False
         async with httpx.AsyncClient(**client_kwargs) as c:

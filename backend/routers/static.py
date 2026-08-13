@@ -9,9 +9,11 @@ from fastapi.staticfiles import StaticFiles
 from config import (
     BASE_DIR, PROJECT_DIR, VIDEO_TOOL_DIR, IMAGE_TOOL_DIR,
     BG_REMOVER_DIR, IMAGE_COMPOSITE_DIR, TEXT_REMOVER_DIR,
-    WX_VIDEO_PARSER_DIR, LIBS_DIR, WATERMARK_TOOL_DIR,
+    LIBS_DIR, WATERMARK_TOOL_DIR,
     TRANSCRIPT_DIR,
 )
+
+from version import APP_NAME, APP_VERSION
 
 router = APIRouter()
 
@@ -27,6 +29,12 @@ async def tools_home():
     if index_file.exists():
         return FileResponse(str(index_file))
     return {"message": "小小工具箱 API 运行中", "docs": "/docs"}
+
+
+@router.get("/api/version")
+async def app_version():
+    """返回应用版本号（读取自版本配置文件 version.json，前端与后端共用同一来源）"""
+    return {"name": APP_NAME, "version": APP_VERSION}
 
 
 def mount_static(app):
@@ -55,10 +63,6 @@ def mount_static(app):
     # 挂载暗水印检测工具前端
     if WATERMARK_TOOL_DIR.exists():
         app.mount("/tools/watermark-tool", StaticFiles(directory=str(WATERMARK_TOOL_DIR), html=True), name="watermark-tool")
-
-    # 挂载视频号解析工具前端
-    if WX_VIDEO_PARSER_DIR.exists():
-        app.mount("/tools/wx-video-parser", StaticFiles(directory=str(WX_VIDEO_PARSER_DIR), html=True), name="wx-video-parser")
 
     # 挂载文案提取工具前端
     if TRANSCRIPT_DIR.exists():

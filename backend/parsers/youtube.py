@@ -5,6 +5,7 @@ from typing import Dict, Any
 
 from config import SSL_VERIFY
 
+from ytdlp_cookies import get_ytdlp_cookie_opts, get_youtube_extractor_args
 from ._utils import _make_info, _empty_result, _ok
 
 
@@ -25,6 +26,8 @@ async def parse(url: str) -> Dict[str, Any]:
             "skip_download": True,
             "nocheckcertificate": not SSL_VERIFY,
         }
+        ydl_opts.update(get_ytdlp_cookie_opts())
+        ydl_opts.update(get_youtube_extractor_args())
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
     except Exception as e:

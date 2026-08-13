@@ -19,6 +19,7 @@ from fastapi.exception_handlers import http_exception_handler
 
 from config import cleanup_download_dir, DOWNLOAD_MAX_AGE_HOURS
 from deps import model_manager, disk_cache
+from version import get_app_version
 from routers import video, bg_remove, text_remove, watermark, watermark_removal, upscale, history, static
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ async def lifespan(_app):
     disk_cache.stop_background_cleanup()
 
 
-app = FastAPI(title="小小工具箱", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="小小工具箱", version=get_app_version(), lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

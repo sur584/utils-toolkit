@@ -143,45 +143,75 @@ class LocalWhisperASR:
         if self._model is None:
             self._load_model()
 
-        # Write audio to a temp file — faster-whisper needs a file path
-        suffix = f".{audio_format}"
+        # Write audio to a temp file — faster-whisper needs a file path.
+        # 注意：faster-whisper 的 decode_audio 并不读取 audio_format，而是靠文件扩展名
+        # 选择解封装器。当上游把「视频字节」按 .mp3 写入时，PyAV 会用 mp3 解封装器打开，
+        # 导致 container.decode(audio=0) 找不到音频流而崩溃
+        # (IndexError: tuple index out of range)。因此首轮按传入格式写入，失败时改用
+        # 中性扩展名让 PyAV 按内容自动探测容器格式后重试。
+        def _write_tmp(suffix: str) -> str:
+            fd, path = tempfile.mkstemp(suffix=suffix)
+            os.close(fd)
+            with open(path, "wb") as fh:
+                fh.write(audio_bytes)
+            return path
+
+        def _do_transcribe(path: str):
+            segments, info = self._model.transcribe(
+                path,
+                language=language,
+                vad_filter=True,
+                vad_parameters=dict(
+                    threshold=0.3,
+                    min_speech_duration_ms=250,
+                    min_silence_duration_ms=500,
+                ),
+            )
+            result = []
+            for segment in segments:
+                text = segment.text.strip()
+                if text:
+                    result.append({
+                        "start": float(segment.start),
+                        "end": float(segment.end),
+                        "text": text,
+                    })
+            return result, info
+
         tmp_path = None
         try:
-            fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-            os.close(fd)
-            with open(tmp_path, "wb") as f:
-                f.write(audio_bytes)
-
-            def _do_transcribe():
-                segments, info = self._model.transcribe(
-                    tmp_path,
-                    language=language,
-                    vad_filter=True,
-                    vad_parameters=dict(
-                        threshold=0.3,
-                        min_speech_duration_ms=250,
-                        min_silence_duration_ms=500,
-                    ),
-                )
-                result = []
-                for segment in segments:
-                    text = segment.text.strip()
-                    if text:
-                        result.append({
-                            "start": float(segment.start),
-                            "end": float(segment.end),
-                            "text": text,
-                        })
-                return result, info
-
+            tmp_path = _write_tmp(f".{audio_format}")
             try:
-                segments, info = await asyncio.to_thread(_do_transcribe)
-            except Exception as e:
-                # CUDA inference failed (e.g. missing cublas64_12.dll) — retry on CPU
-                if self._loaded_device == "cuda" and "cublas" in str(e).lower():
-                    logger.warning("CUDA inference failed (%s), reloading model on CPU...", e)
+                segments, info = await asyncio.to_thread(_do_transcribe, tmp_path)
+            except Exception as first_err:
+                err = str(first_err).lower()
+                if any(k in err for k in (
+                    "index out of range", "no stream", "invalid data",
+                    "moov atom not found", "could not find", "no valid",
+                )):
+                    # 解码格式不匹配（如把视频字节当音频解包）——改用内容探测重试
+                    logger.warning(
+                        "音频首轮解码失败(%s)，改用内容自动探测格式重试", first_err
+                    )
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                    tmp_path = _write_tmp(".bin")
+                    try:
+                        segments, info = await asyncio.to_thread(_do_transcribe, tmp_path)
+                    except Exception as retry_err:
+                        # 即便按内容探测仍无法解出音频流，说明文件本身无音轨/格式无法识别，
+                        # 抛出清晰可执行的错误，避免上层收到晦涩的 IndexError。
+                        raise RuntimeError(
+                            "音频解码失败：文件不包含任何音轨（或格式无法识别），"
+                            "无法进行语音识别。该视频可能为纯无声视频或下载到了无音轨变体。"
+                        ) from retry_err
+                elif self._loaded_device == "cuda" and "cublas" in err:
+                    # CUDA 推理失败（缺少 cublas 等）——回退 CPU 重载重试
+                    logger.warning("CUDA 推理失败(%s)，在 CPU 上重载模型重试", first_err)
                     self._load_model(force_cpu=True)
-                    segments, info = await asyncio.to_thread(_do_transcribe)
+                    segments, info = await asyncio.to_thread(_do_transcribe, tmp_path)
                 else:
                     raise
 
